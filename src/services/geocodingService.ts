@@ -18,8 +18,10 @@ export interface NormalizedLocation {
   geocoding_provider: string;
 }
 
-const PROVIDER = import.meta.env.VITE_GEOCODING_PROVIDER || 'nominatim';
-const BASE_URL = import.meta.env.VITE_NOMINATIM_BASE_URL || 'https://nominatim.openstreetmap.org';
+import { ENV } from '../config/env';
+
+const PROVIDER = ENV.GEOCODING_PROVIDER;
+const BASE_URL = ENV.NOMINATIM_BASE_URL;
 
 // Nominatim Policy requires a descriptive User-Agent
 const HEADERS = {

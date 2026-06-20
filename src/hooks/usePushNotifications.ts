@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { PushService } from '../services/pushService';
 import { DbService } from '../services/dbService';
+import { ENV } from '../config/env';
 
 export const usePushNotifications = (userId: string) => {
   const [pushSupported, setPushSupported] = useState<boolean>(false);
@@ -30,8 +31,8 @@ export const usePushNotifications = (userId: string) => {
         throw new Error('Permiso de notificaciones denegado.');
       }
 
-      // VAPID Public Key (standard generated keys for Web Push, matches supabase env variables)
-      const VAPID_PUBLIC_KEY = 'BI5xG6wNqg1h_f0p_c5efS9d8f7g6h5j4k3l2m1n0o9p8q7r6s5t4u3v2w1x0y9z8a7b6c5d4e3f2g1h0'; 
+      // VAPID Public Key from centralized env configuration
+      const VAPID_PUBLIC_KEY = ENV.VAPID_PUBLIC_KEY; 
       const subscription = await PushService.subscribeToPush(VAPID_PUBLIC_KEY);
 
       // Save to Supabase
