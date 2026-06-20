@@ -1,0 +1,2309 @@
+import React, { useEffect, useState } from 'react';
+import { 
+  Shield, Check, X, ToggleLeft, ToggleRight, Plus, 
+  Trophy, Settings, CheckSquare, Camera,
+  TrendingUp, BarChart2, Flag, Package, Map, Users,
+  ShoppingBag, MapPin, AlertCircle
+} from 'lucide-react';
+import { motion } from 'framer-motion';
+import { supabase } from '../lib/supabaseClient';
+import { DbService } from '../services/dbService';
+import { NotificationService } from '../services/notificationService';
+import { QRScanner } from '../components/QRScanner';
+import { RealQRScanner } from '../components/RealQRScanner';
+import type { 
+  ModuleConfig, Player, Tournament, 
+  Organizer, Judge, Store as StoreType, StoreStock, Registration, Product, Journey
+} from '../services/dbService';
+import { LocationAutocomplete } from '../components/LocationAutocomplete';
+import type { NormalizedLocation } from '../services/geocodingService';
+
+export const AdminDashboard: React.FC = () => {
+  const [currentUser, setCurrentUser] = useState<any>({ id: 'usr-visitor', role: 'Visitante', email: '' });
+  const [modules, setModules] = useState<ModuleConfig[]>([]);
+  const [activeLocalities, setActiveLocalities] = useState<{ id: number; department: string; name: string; active: boolean }[]>([]);
+
+  // Tab states
+  const [activeSuperTab, setActiveSuperTab] = useState<'analytics' | 'modules' | 'retail'>('analytics');
+  const [activeDistributorTab, setActiveDistributorTab] = useState<'certifications' | 'stats' | 'retail'>('certifications');
+  
+  // Interactive Map states
+  const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
+  
+  // Global stocks state for dashboards
+  const [allStocks, setAllStocks] = useState<any[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  
+  // Simulated Email alerts
+  const [emailToasts, setEmailToasts] = useState<{ id: string; to: string; subject: string; message: string }[]>([]);
+
+  const triggerSimulatedEmail = (to: string, subject: string, message: string) => {
+    const id = Math.random().toString();
+    setEmailToasts(prev => [...prev, { id, to, subject, message }]);
+    setTimeout(() => {
+      setEmailToasts(prev => prev.filter(t => t.id !== id));
+    }, 6000);
+  };
+
+  // Super Admin states
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [organizers, setOrganizers] = useState<Organizer[]>([]);
+  const [stores, setStores] = useState<StoreType[]>([]);
+  const [judges, setJudges] = useState<Judge[]>([]);
+
+  // Distribuidor states
+  const [pendingTournaments, setPendingTournaments] = useState<Tournament[]>([]);
+
+  // Store owner states
+  const [myStore, setMyStore] = useState<StoreType | null>(null);
+  const [storeStocks, setStoreStocks] = useState<(StoreStock & { productName: string })[]>([]);
+
+  // Organizer states
+  const [organizerTab, setOrganizerTab] = useState<'tournaments' | 'journeys'>('tournaments');
+  const [isCreatingTournament, setIsCreatingTournament] = useState(false);
+  const [newTourName, setNewTourName] = useState('');
+  const [newTourLeague, setNewTourLeague] = useState<'Junior' | 'Open' | 'Ambas'>('Open');
+  const [newTourLocation, setNewTourLocation] = useState<NormalizedLocation | null>(null);
+  const [newTourDate, setNewTourDate] = useState('');
+  const [newTourTime, setNewTourTime] = useState('');
+  const [newTourSlots, setNewTourSlots] = useState(16);
+  const [newTourFormat, setNewTourFormat] = useState<'Eliminación Directa' | 'Suizo' | 'Round Robin'>('Eliminación Directa');
+  const [newTourDesc, setNewTourDesc] = useState('');
+  const [newTourJudgeId, setNewTourJudgeId] = useState('');
+
+  // Journey states
+  const [isCreatingJourney, setIsCreatingJourney] = useState(false);
+  const [newJourneyTitle, setNewJourneyTitle] = useState('');
+  const [newJourneyDesc, setNewJourneyDesc] = useState('');
+  const [newJourneyLocation, setNewJourneyLocation] = useState<NormalizedLocation | null>(null);
+  const [newJourneyDate, setNewJourneyDate] = useState('');
+  const [newJourneyTime, setNewJourneyTime] = useState('');
+  const [journeys, setJourneys] = useState<Journey[]>([]);
+
+  // Selected tournament for organizer results loading
+  const [selectedManageTour, setSelectedManageTour] = useState<Tournament | null>(null);
+  const [manageRegistrations, setManageRegistrations] = useState<Registration[]>([]);
+  const [placements, setPlacements] = useState<{ [playerId: string]: number }>({});
+
+  const [feedback, setFeedback] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // QR Check-in states & handlers
+  const [isScanningQR, setIsScanningQR] = useState(false);
+  const [scannerMode, setScannerMode] = useState<'camera' | 'demo'>('camera');
+  const [scanResult, setScanResult] = useState<any>(null);
+
+  const handleQRScanSuccess = async (scannedData: any) => {
+    // 1. Offline Check
+    if (!navigator.onLine) {
+      setScanResult({
+        success: false,
+        error: 'offline',
+        message: 'No es posible validar QR sin conexión.'
+      });
+      return;
+    }
+
+    try {
+      // 2. Validate QR format and query player on Supabase
+      if (!scannedData || !scannedData.player_id) {
+        setScanResult({
+          success: false,
+          error: 'invalid',
+          message: '❌ Código QR inválido o corrupto.'
+        });
+        return;
+      }
+
+      // Check if player exists in Supabase
+      const { data: player, error: playerErr } = await supabase
+        .from('players')
+        .select('id, first_name, last_name, league_id, qr_code_token')
+        .eq('id', scannedData.player_id)
+        .maybeSingle();
+
+      if (playerErr || !player) {
+        setScanResult({
+          success: false,
+          error: 'not_found',
+          message: '❌ Jugador no encontrado. El BEY-ID no está registrado en el sistema.'
+        });
+        return;
+      }
+
+      // Check if the token matches (skip check if unknown / manual)
+      if (scannedData.bey_id && scannedData.bey_id !== 'UNKNOWN' && player.qr_code_token !== scannedData.bey_id) {
+        setScanResult({
+          success: false,
+          error: 'token_mismatch',
+          message: '❌ Firma digital BEY-ID incorrecta o desactualizada.'
+        });
+        return;
+      }
+
+      // 3. Query all registrations for this player to check other tournaments
+      const { data: allRegs, error: regErr } = await supabase
+        .from('tournament_registrations')
+        .select('*, tournaments(name)')
+        .eq('player_id', player.id);
+
+      if (regErr) throw regErr;
+
+      // Find registration for CURRENT tournament
+      const currentReg = allRegs?.find(r => r.tournament_id === selectedManageTour?.id);
+
+      if (!currentReg) {
+        // Is player registered in another tournament?
+        const otherReg = allRegs && allRegs.length > 0 ? allRegs[0] : null;
+        if (otherReg) {
+          const otherTourName = (otherReg.tournaments as any)?.name || 'otro torneo';
+          setScanResult({
+            success: false,
+            error: 'wrong_tournament',
+            message: `❌ Jugador pertenece a otro torneo: "${otherTourName}".`
+          });
+        } else {
+          setScanResult({
+            success: false,
+            error: 'not_registered',
+            message: '❌ Jugador no inscripto en ningún torneo.'
+          });
+        }
+        return;
+      }
+
+      // 4. Check if already checked in
+      if (currentReg.checked_in) {
+        setScanResult({
+          success: false,
+          warning: true,
+          error: 'already_checked_in',
+          nombre: `${player.first_name} ${player.last_name}`,
+          message: '⚠️ Check-In ya registrado para este torneo.',
+          regId: currentReg.id
+        });
+        return;
+      }
+
+      // 5. Successful validation
+      setScanResult({
+        success: true,
+        nombre: `${player.first_name} ${player.last_name}`,
+        player_id: player.id,
+        bey_id: player.qr_code_token,
+        league: player.league_id,
+        regId: currentReg.id
+      });
+
+    } catch (err: any) {
+      console.error('Error validating QR:', err);
+      setScanResult({
+        success: false,
+        error: 'server_error',
+        message: 'Error al conectar con el servidor para validar check-in.'
+      });
+    }
+  };
+
+  const handleConfirmQRCheckIn = async () => {
+    if (!scanResult || !scanResult.regId) return;
+    
+    try {
+      await DbService.updateCheckIn(scanResult.regId, true, 'qr');
+      
+      await DbService.createNotification(
+        scanResult.player_id, 
+        'Check-in Realizado', 
+        `Tu participación en el torneo ha sido confirmada vía código QR.`, 
+        'inscripcion'
+      );
+
+      // Trigger simulated email notification
+      const player = players.find(p => p.id === scanResult.player_id);
+      if (player) {
+        triggerSimulatedEmail(
+          player.email,
+          '¡Check-in Acreditado vía QR! - Beyblade LATAM',
+          `Hola ${player.first_name}, tu asistencia al torneo "${selectedManageTour?.name || 'Torneo Oficial'}" ha sido acreditada correctamente mediante código QR. ¡Prepárate para la arena, 3... 2... 1... Let it Rip!`
+        );
+      }
+
+      setFeedback(`Check-In QR confirmado para ${scanResult.nombre}.`);
+      setTimeout(() => setFeedback(''), 3000);
+      
+      if (selectedManageTour) {
+        const regs = await DbService.getTournamentRegistrations(selectedManageTour.id);
+        setManageRegistrations(regs);
+      }
+
+      setIsScanningQR(false);
+      setScanResult(null);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al validar check-in QR.');
+    }
+  };
+
+  const loadData = async () => {
+    // Current user and configs from Supabase Auth session
+    const { data: { session } } = await supabase.auth.getSession();
+    let userProfile: any = { id: 'usr-visitor', role: 'Visitante', email: '' };
+
+    if (session?.user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role, country_id')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      if (profile) {
+        let mappedRole = 'Visitante';
+        switch (profile.role) {
+          case 'super_admin': mappedRole = 'Super Admin'; break;
+          case 'country_admin': mappedRole = 'Distribuidor País'; break;
+          case 'organizer': mappedRole = 'Organizador'; break;
+          case 'judge': mappedRole = 'Juez'; break;
+          case 'store': mappedRole = 'Tienda'; break;
+          case 'player': mappedRole = 'Jugador'; break;
+          default: mappedRole = 'Visitante'; break;
+        }
+
+        userProfile = {
+          id: session.user.id,
+          role: mappedRole,
+          email: session.user.email || '',
+          country_id: (profile as any).country_id || 'UY'
+        };
+      }
+    }
+
+    setCurrentUser(userProfile);
+    const mods = await DbService.getModules();
+    setModules(mods);
+
+    // Load global product list
+    const allProducts = await DbService.getProductsList();
+    setProducts(allProducts);
+
+    // Load global store stocks
+    if (userProfile.role === 'Super Admin' || userProfile.role === 'Distribuidor País') {
+      const { data: stocksData } = await supabase.from('store_stock').select('*');
+      setAllStocks(stocksData || []);
+    }
+
+    // Load Super Admin / Distribuidor stats
+    const allPlayers = await DbService.getPlayersList();
+    setPlayers(allPlayers);
+    const allTours = await DbService.getTournamentsList();
+    setTournaments(allTours);
+    const allOrgs = await DbService.getOrganizersList();
+    setOrganizers(allOrgs);
+    const allStores = await DbService.getStoresList();
+    setStores(allStores);
+    const allJudges = await DbService.getJudgesList();
+    setJudges(allJudges);
+
+    // Pending Validation Tournaments for Distributor
+    const pendingVal = await DbService.getPendingValidationResults();
+    setPendingTournaments(pendingVal);
+
+    // Load store specific profile
+    if (userProfile.role === 'Tienda') {
+      const storeProfile = allStores.find(s => s.id === userProfile.id);
+      if (storeProfile) {
+        setMyStore(storeProfile);
+        const stocks = await DbService.getStoreStocksList(storeProfile.id);
+        const enrichedStocks = allProducts.map(p => {
+          const s = stocks.find(st => st.product_id === p.id);
+          return {
+            store_id: storeProfile.id,
+            product_id: p.id,
+            stock_status: s ? s.stock_status : ('Agotado' as const),
+            productName: p.name
+          };
+        });
+        setStoreStocks(enrichedStocks);
+      }
+    }
+    const localList = await DbService.getLocalities();
+    setActiveLocalities(localList);
+
+    const journeysList = await DbService.getJourneys();
+    setJourneys(journeysList);
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  // -------------------------------------------------------------
+  // SUPER ADMIN ACTIONS
+  // -------------------------------------------------------------
+  const handleToggleModule = async (id: string, active: boolean) => {
+    const updated = await DbService.updateModule(id, active);
+    setModules(updated);
+    setFeedback('Módulo configurado exitosamente.');
+    setTimeout(() => setFeedback(''), 3000);
+  };
+
+  // -------------------------------------------------------------
+  // DISTRIBUIDOR ACTIONS
+  // -------------------------------------------------------------
+  const handleStoreApprove = async (id: string, status: 'Aprobado' | 'Rechazado') => {
+    await DbService.updateStoreStatus(id, status);
+    loadData();
+  };
+
+  const handleOrganizerApprove = async (id: string, status: 'Aprobado' | 'Rechazado') => {
+    await DbService.updateOrganizerStatus(id, status);
+    loadData();
+  };
+
+  const handleJudgeApprove = async (id: string, status: 'Aprobado' | 'Rechazado') => {
+    await DbService.updateJudgeStatus(id, status);
+    loadData();
+  };
+
+  const handleValidateResults = async (tournamentId: string) => {
+    try {
+      const tour = tournaments.find(t => t.id === tournamentId);
+      const tourResults = await DbService.getTournamentResults(tournamentId);
+
+      await DbService.validateTournamentResults(tournamentId);
+
+      // Trigger notification and simulated emails to all players in the tournament
+      for (const res of tourResults) {
+        const player = players.find(p => p.id === res.player_id);
+        if (player) {
+          // Send notification
+          await NotificationService.notifyUser(res.player_id, 'points_awarded', {
+            title: 'Puntos acreditados',
+            message: `Se acreditaron ${res.points_awarded} puntos a tu ranking por "${tour?.name || 'Torneo Oficial'}".`,
+            url: `/profile/${res.player_id}`,
+            points: res.points_awarded,
+            tournamentName: tour?.name
+          });
+
+          triggerSimulatedEmail(
+            player.email,
+            '¡Tus puntos del Ranking han sido acreditados! - Beyblade Uruguay',
+            `Hola ${player.first_name}, los resultados de "${tour?.name || 'Torneo Oficial'}" han sido validados oficialmente por el distribuidor de tu país. Se han sumado +${res.points_awarded} puntos a tu cuenta de ranking. ¡Sigue luchando!`
+          );
+        }
+      }
+
+      setFeedback('Resultados validados oficialmente. Puntos acreditados al Ranking.');
+      loadData();
+      setTimeout(() => setFeedback(''), 3500);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al validar resultados.');
+    }
+  };
+
+  // -------------------------------------------------------------
+  // ORGANIZER ACTIONS
+  // -------------------------------------------------------------
+  const dispatchNotifications = async (
+    type: 'new_tournament' | 'new_journey',
+    title: string,
+    message: string,
+    url: string,
+    countryId: string,
+    _localityId: number,
+    localityName: string
+  ) => {
+    try {
+      const { data: allPrefs, error } = await supabase
+        .from('notification_preferences')
+        .select('*');
+
+      if (error) throw error;
+      if (!allPrefs) return { total: 0, inApp: 0, push: 0, whatsapp: 0 };
+
+      const { data: allPlayers, error: playersErr } = await supabase
+        .from('players')
+        .select('id, locality, country_id');
+
+      if (playersErr) throw playersErr;
+
+      let inAppCount = 0;
+      let pushCount = 0;
+      let whatsappCount = 0;
+
+      for (const pref of allPrefs) {
+        const playerObj = allPlayers?.find(p => p.id === pref.user_id);
+        if (!playerObj) continue;
+
+        if (playerObj.country_id !== countryId) continue;
+
+        if (pref.locality_only) {
+          if (playerObj.locality.toLowerCase() !== localityName.toLowerCase()) {
+            continue;
+          }
+        }
+
+        const report = await NotificationService.notifyUser(pref.user_id, type, {
+          title,
+          message,
+          url
+        });
+
+        if (report.inApp === 'sent') inAppCount++;
+        if (report.push === 'sent') pushCount++;
+        if (report.whatsapp === 'sent') whatsappCount++;
+      }
+
+      return {
+        total: inAppCount + pushCount + whatsappCount,
+        inApp: inAppCount,
+        push: pushCount,
+        whatsapp: whatsappCount
+      };
+    } catch (err) {
+      console.error('Error dispatching notifications:', err);
+      return { total: 0, inApp: 0, push: 0, whatsapp: 0 };
+    }
+  };
+
+  const handleCreateTournament = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setFeedback('');
+
+    const orgProfile = organizers.find(o => o.id === currentUser.id);
+    if (!orgProfile || orgProfile.status !== 'Aprobado') {
+      setErrorMsg('Tu acreditación de organizador debe ser Aprobada por el distribuidor nacional para poder crear torneos.');
+      return;
+    }
+
+    if (!newTourName || !newTourLocation || !newTourDate || !newTourTime) {
+      setErrorMsg('Completa los campos obligatorios del torneo y selecciona una ubicación válida.');
+      return;
+    }
+
+    const selectedCountryCode = newTourLocation.country_code?.toUpperCase();
+    const userCountryCode = (currentUser.country_id || 'UY').toUpperCase();
+
+    if (selectedCountryCode && userCountryCode && selectedCountryCode !== userCountryCode) {
+      setErrorMsg(`La ubicación seleccionada (${selectedCountryCode}) no corresponde a tu país de registro (${userCountryCode}).`);
+      return;
+    }
+
+    try {
+      const selectedJudge = judges.find(j => j.id === newTourJudgeId);
+      await DbService.createTournament({
+        name: newTourName,
+        league_id: newTourLeague,
+        country_id: selectedCountryCode || userCountryCode,
+        department: newTourLocation.department || 'Montevideo',
+        locality: newTourLocation.locality || 'Montevideo',
+        address: newTourLocation.address || newTourLocation.full_address,
+        date: newTourDate,
+        time: newTourTime,
+        slots_total: newTourSlots,
+        format: newTourFormat,
+        judge_id: newTourJudgeId || undefined,
+        judge_name: selectedJudge ? selectedJudge.name : undefined,
+        organizer_id: orgProfile.id,
+        organizer_name: orgProfile.name,
+        description: newTourDesc,
+        status: 'publicado', // Automatically publish
+        latitude: newTourLocation.latitude,
+        longitude: newTourLocation.longitude,
+        full_address: newTourLocation.full_address,
+        geocoding_provider: newTourLocation.geocoding_provider,
+        osm_place_id: newTourLocation.osm_place_id,
+        osm_type: newTourLocation.osm_type,
+        osm_class: newTourLocation.osm_class,
+        osm_importance: newTourLocation.osm_importance,
+        geocoded_at: new Date().toISOString()
+      });
+
+      // Get locality_id for notifications
+      const { data: locData } = await supabase
+        .from('localities')
+        .select('id')
+        .eq('name', newTourLocation.locality || 'Montevideo')
+        .maybeSingle();
+      const locId = locData?.id || 1;
+
+      // Dispatch notifications
+      const notifReport = await dispatchNotifications(
+        'new_tournament',
+        'Nuevo torneo Beyblade',
+        `Se publicó "${newTourName}" en ${newTourLocation.locality || 'tu localidad'}. Ya podés inscribirte.`,
+        `/tournaments`,
+        selectedCountryCode || userCountryCode,
+        locId,
+        newTourLocation.locality || 'Montevideo'
+      );
+
+      setFeedback(`Torneo creado y publicado oficialmente. Notificaciones -> Plataforma: ${notifReport.inApp}, Push: ${notifReport.push}, WhatsApp: ${notifReport.whatsapp}`);
+      setIsCreatingTournament(false);
+      
+      // Reset form
+      setNewTourName('');
+      setNewTourLocation(null);
+      setNewTourDate('');
+      setNewTourTime('');
+      setNewTourDesc('');
+
+      loadData();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al crear torneo.');
+    }
+  };
+
+  const handleCreateJourney = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setFeedback('');
+
+    const orgProfile = organizers.find(o => o.id === currentUser.id);
+    if (!orgProfile || orgProfile.status !== 'Aprobado') {
+      setErrorMsg('Tu acreditación de organizador debe ser Aprobada para crear jornadas.');
+      return;
+    }
+
+    if (!newJourneyTitle || !newJourneyLocation || !newJourneyDate || !newJourneyTime) {
+      setErrorMsg('Completa los campos obligatorios y selecciona una ubicación.');
+      return;
+    }
+
+    const selectedCountryCode = newJourneyLocation.country_code?.toUpperCase();
+    const userCountryCode = (currentUser.country_id || 'UY').toUpperCase();
+
+    if (selectedCountryCode && userCountryCode && selectedCountryCode !== userCountryCode) {
+      setErrorMsg(`La ubicación seleccionada (${selectedCountryCode}) no corresponde a tu país de registro (${userCountryCode}).`);
+      return;
+    }
+
+    try {
+      // Ensure territory exists
+      const territory = await DbService.ensureTerritoryStructure(
+        newJourneyLocation.country || 'Uruguay',
+        newJourneyLocation.country_code || 'UY',
+        newJourneyLocation.department || 'Montevideo',
+        newJourneyLocation.locality || 'Montevideo',
+        newJourneyLocation.latitude,
+        newJourneyLocation.longitude,
+        newJourneyLocation.osm_place_id,
+        newJourneyLocation.osm_type
+      );
+
+      const startsAtIso = new Date(`${newJourneyDate}T${newJourneyTime}`).toISOString();
+      await DbService.createJourney({
+        title: newJourneyTitle,
+        description: newJourneyDesc,
+        country_id: selectedCountryCode || userCountryCode,
+        department_id: territory.departmentId,
+        locality_id: territory.localityId,
+        address: newJourneyLocation.address || newJourneyLocation.full_address,
+        latitude: newJourneyLocation.latitude || null,
+        longitude: newJourneyLocation.longitude || null,
+        starts_at: startsAtIso,
+        status: 'publicado',
+        created_by: currentUser.id
+      });
+
+      // Dispatch notifications
+      const notifReport = await dispatchNotifications(
+        'new_journey',
+        'Nueva jornada Beyblade',
+        `Se publicó "${newJourneyTitle}" en ${newJourneyLocation.locality || 'tu localidad'}. Te esperamos para jugar y aprender.`,
+        `/academy`,
+        selectedCountryCode || userCountryCode,
+        territory.localityId,
+        newJourneyLocation.locality || 'Montevideo'
+      );
+
+      setFeedback(`Jornada creada y publicada correctamente. Notificaciones -> Plataforma: ${notifReport.inApp}, Push: ${notifReport.push}, WhatsApp: ${notifReport.whatsapp}`);
+      setIsCreatingJourney(false);
+      
+      // Reset form
+      setNewJourneyTitle('');
+      setNewJourneyDesc('');
+      setNewJourneyLocation(null);
+      setNewJourneyDate('');
+      setNewJourneyTime('');
+
+      loadData();
+    } catch (err: any) {
+      console.error('Error creating journey:', err);
+      setErrorMsg(err.message || 'Error al crear jornada.');
+    }
+  };
+
+  const handleSelectManageTournament = async (tour: Tournament) => {
+    setSelectedManageTour(tour);
+    const regs = await DbService.getTournamentRegistrations(tour.id);
+    setManageRegistrations(regs);
+    
+    // Preset placements with default positions
+    const placeObj: { [playerId: string]: number } = {};
+    regs.forEach((r, idx) => {
+      placeObj[r.player_id] = idx + 1;
+    });
+    setPlacements(placeObj);
+  };
+
+  const handleCheckInToggle = async (regId: string, checked: boolean) => {
+    await DbService.updateCheckIn(regId, checked);
+    if (selectedManageTour) {
+      const regs = await DbService.getTournamentRegistrations(selectedManageTour.id);
+      setManageRegistrations(regs);
+    }
+  };
+
+  const handleSavePlacements = async () => {
+    if (!selectedManageTour) return;
+    
+    const placementsList = Object.keys(placements).map(playerId => {
+      const reg = manageRegistrations.find(r => r.player_id === playerId);
+      return {
+        player_id: playerId,
+        player_name: reg ? reg.player_name || 'Jugador' : 'Jugador',
+        position: Number(placements[playerId])
+      };
+    });
+
+    await DbService.uploadTournamentResults(selectedManageTour.id, placementsList);
+    setFeedback('Posiciones guardadas. Resultados enviados a validación de Distribuidor.');
+    setSelectedManageTour(null);
+    loadData();
+    setTimeout(() => setFeedback(''), 3000);
+  };
+
+  // -------------------------------------------------------------
+  // STORE ACTIONS
+  // -------------------------------------------------------------
+  const handleUpdateStock = async (prodId: string, status: StoreStock['stock_status']) => {
+    if (!myStore) return;
+    await DbService.updateStoreStockItem(myStore.id, prodId, status);
+    loadData();
+  };
+
+  const handleSaveStoreProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!myStore) return;
+    await DbService.updateStoreProfile(myStore);
+    setFeedback('Perfil de tienda actualizado con éxito.');
+    setTimeout(() => setFeedback(''), 3000);
+  };
+
+
+  return (
+    <div className="space-y-8 animate-fade-in">
+      
+      {/* Dashboard Top bar info */}
+      <div className="border-b border-white/5 pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-black text-white uppercase tracking-wide flex items-center gap-2">
+            <Shield className="h-6 w-6 text-beyblade-electricRed" /> Panel de Control
+          </h1>
+          <p className="text-xs text-gray-400">
+            Vista del rol: <span className="text-beyblade-electricCyan font-bold">{currentUser.role}</span>
+          </p>
+        </div>
+      </div>
+
+      {feedback && (
+        <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs p-3.5 rounded-xl flex items-center gap-2">
+          <Check className="h-4.5 w-4.5 shrink-0" />
+          {feedback}
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="bg-beyblade-electricRed/10 border border-beyblade-electricRed/20 text-beyblade-electricRed text-xs p-3.5 rounded-xl">
+          {errorMsg}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SUPER ADMIN HASBRO PANEL */}
+      {/* ========================================================================= */}
+      {currentUser.role === 'Super Admin' && (
+        <div className="space-y-8">
+          {/* Sub-tab selection bar */}
+          <div className="flex border-b border-white/5 pb-2">
+            <button
+              onClick={() => setActiveSuperTab('analytics')}
+              className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                activeSuperTab === 'analytics'
+                  ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <BarChart2 className="h-4 w-4" /> Analytics & KPIs
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveSuperTab('modules')}
+              className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                activeSuperTab === 'modules'
+                  ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Settings className="h-4 w-4" /> Control de Módulos
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveSuperTab('retail')}
+              className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                activeSuperTab === 'retail'
+                  ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Package className="h-4 w-4" /> Retail & Stock
+              </span>
+            </button>
+          </div>
+
+          {/* Tab 1: Analytics & KPIs */}
+          {activeSuperTab === 'analytics' && (
+            <div className="space-y-8">
+              {/* KPIs Grid */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <motion.div 
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.05 }}
+                  className="bg-beyblade-card border border-white/5 p-5 rounded-2xl relative overflow-hidden clip-cyber-card hover:border-beyblade-electricCyan/20 transition-colors group shadow-lg"
+                >
+                  <div className="absolute inset-0 tech-grid opacity-10 pointer-events-none"></div>
+                  <div className="absolute top-0 right-0 p-4 opacity-[0.03] group-hover:opacity-10 transition-opacity">
+                    <Users className="h-12 w-12 text-beyblade-electricCyan" />
+                  </div>
+                  <span className="text-[9px] text-gray-400 font-extrabold uppercase tracking-widest font-esports block">Jugadores Registrados</span>
+                  <p className="text-3xl font-black text-white mt-2 font-title">{players.length}</p>
+                  <span className="text-[9px] text-emerald-400 font-extrabold font-esports mt-1.5 block flex items-center gap-1">
+                    <TrendingUp className="h-3 w-3 animate-bounce" /> +15% este mes
+                  </span>
+                  <div className="absolute bottom-0 left-0 w-full h-[2px] bg-gradient-to-r from-beyblade-electricCyan to-transparent opacity-30"></div>
+                </motion.div>
+
+                <motion.div 
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.1 }}
+                  className="bg-beyblade-card border border-white/5 p-5 rounded-2xl relative overflow-hidden clip-cyber-card hover:border-beyblade-electricRed/20 transition-colors group shadow-lg"
+                >
+                  <div className="absolute inset-0 tech-grid opacity-10 pointer-events-none"></div>
+                  <div className="absolute top-0 right-0 p-4 opacity-[0.03] group-hover:opacity-10 transition-opacity">
+                    <Trophy className="h-12 w-12 text-beyblade-electricRed" />
+                  </div>
+                  <span className="text-[9px] text-gray-400 font-extrabold uppercase tracking-widest font-esports block">Torneos Ejecutados</span>
+                  <p className="text-3xl font-black text-white mt-2 font-title">{tournaments.length}</p>
+                  <span className="text-[9px] text-gray-400 font-extrabold font-esports mt-1.5 block uppercase tracking-wide">
+                    {tournaments.filter(t => t.status === 'finalizado').length} finalizados
+                  </span>
+                  <div className="absolute bottom-0 left-0 w-full h-[2px] bg-gradient-to-r from-beyblade-electricRed to-transparent opacity-30"></div>
+                </motion.div>
+
+                <motion.div 
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.15 }}
+                  className="bg-beyblade-card border border-white/5 p-5 rounded-2xl relative overflow-hidden clip-cyber-card hover:border-beyblade-gold/20 transition-colors group shadow-lg"
+                >
+                  <div className="absolute inset-0 tech-grid opacity-10 pointer-events-none"></div>
+                  <div className="absolute top-0 right-0 p-4 opacity-[0.03] group-hover:opacity-10 transition-opacity">
+                    <ShoppingBag className="h-12 w-12 text-beyblade-gold" />
+                  </div>
+                  <span className="text-[9px] text-gray-400 font-extrabold uppercase tracking-widest font-esports block">Tiendas Certificadas</span>
+                  <p className="text-3xl font-black text-white mt-2 font-title">{stores.length}</p>
+                  <span className="text-[9px] text-beyblade-electricCyan font-extrabold font-esports mt-1.5 block uppercase tracking-wide">
+                    {stores.filter(s => s.certification_status === 'Aprobado').length} activas
+                  </span>
+                  <div className="absolute bottom-0 left-0 w-full h-[2px] bg-gradient-to-r from-beyblade-gold to-transparent opacity-30"></div>
+                </motion.div>
+
+                <motion.div 
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.2 }}
+                  className="bg-beyblade-card border border-white/5 p-5 rounded-2xl relative overflow-hidden clip-cyber-card hover:border-purple-500/20 transition-colors group shadow-lg"
+                >
+                  <div className="absolute inset-0 tech-grid opacity-10 pointer-events-none"></div>
+                  <div className="absolute top-0 right-0 p-4 opacity-[0.03] group-hover:opacity-10 transition-opacity">
+                    <MapPin className="h-12 w-12 text-purple-500" />
+                  </div>
+                  <span className="text-[9px] text-gray-400 font-extrabold uppercase tracking-widest font-esports block">Localidades Activas</span>
+                  <p className="text-3xl font-black text-white mt-2 font-title">
+                    {activeLocalities.filter(l => l.active).length}
+                  </p>
+                  <span className="text-[9px] text-gray-400 font-extrabold font-esports mt-1.5 block uppercase tracking-wide">
+                    En {new Set(activeLocalities.map(l => l.department)).size} depts
+                  </span>
+                  <div className="absolute bottom-0 left-0 w-full h-[2px] bg-gradient-to-r from-purple-500 to-transparent opacity-30"></div>
+                </motion.div>
+              </div>
+
+              {/* Growth Charts */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Chart 1: Players Growth */}
+                <div className="bg-beyblade-card border border-white/5 rounded-3xl p-6 space-y-4 clip-cyber-card relative">
+                  <div className="absolute inset-0 tech-grid opacity-5 pointer-events-none"></div>
+                  <div>
+                    <h3 className="font-extrabold text-sm text-white uppercase tracking-wider font-title">Crecimiento de Competidores</h3>
+                    <p className="text-[10px] text-gray-500 font-esports uppercase tracking-widest">Últimos 6 meses acumulados</p>
+                  </div>
+                  <div className="pt-2 relative">
+                    <svg viewBox="0 0 500 200" className="w-full h-48 overflow-visible">
+                      <defs>
+                        <linearGradient id="cyan-glow" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#00F0FF" stopOpacity="0.4" />
+                          <stop offset="100%" stopColor="#00F0FF" stopOpacity="0.0" />
+                        </linearGradient>
+                        <filter id="glow-c" x="-20%" y="-20%" width="140%" height="140%">
+                          <feGaussianBlur stdDeviation="4" result="blur" />
+                          <feMerge>
+                            <feMergeNode in="blur" />
+                            <feMergeNode in="SourceGraphic" />
+                          </feMerge>
+                        </filter>
+                      </defs>
+                      {/* Gridlines */}
+                      <line x1="40" y1="20" x2="480" y2="20" stroke="rgba(255, 255, 255, 0.03)" />
+                      <line x1="40" y1="65" x2="480" y2="65" stroke="rgba(255, 255, 255, 0.03)" />
+                      <line x1="40" y1="110" x2="480" y2="110" stroke="rgba(255, 255, 255, 0.03)" />
+                      <line x1="40" y1="155" x2="480" y2="155" stroke="rgba(255, 255, 255, 0.08)" />
+                      
+                      {/* Y-axis Labels */}
+                      <text x="18" y="24" fill="rgba(255, 255, 255, 0.3)" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">350</text>
+                      <text x="18" y="69" fill="rgba(255, 255, 255, 0.3)" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">200</text>
+                      <text x="18" y="114" fill="rgba(255, 255, 255, 0.3)" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">100</text>
+                      <text x="18" y="159" fill="rgba(255, 255, 255, 0.3)" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">0</text>
+
+                      {/* Area Fill */}
+                      <path d="M 50 155 L 50 137 C 50 137, 120 123, 130 123 L 210 107 L 290 79 L 370 59 L 450 31 L 450 155 Z" fill="url(#cyan-glow)" />
+
+                      {/* Line Path with Glow Filter */}
+                      <path d="M 50 137 L 130 123 L 210 107 L 290 79 L 370 59 L 450 31" fill="none" stroke="#00F0FF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" filter="url(#glow-c)" />
+
+                      {/* Dots */}
+                      <circle cx="50" cy="137" r="4.5" fill="#00F0FF" stroke="#080E18" strokeWidth="1.5" />
+                      <circle cx="130" cy="123" r="4.5" fill="#00F0FF" stroke="#080E18" strokeWidth="1.5" />
+                      <circle cx="210" cy="107" r="4.5" fill="#00F0FF" stroke="#080E18" strokeWidth="1.5" />
+                      <circle cx="290" cy="79" r="4.5" fill="#00F0FF" stroke="#080E18" strokeWidth="1.5" />
+                      <circle cx="370" cy="59" r="4.5" fill="#00F0FF" stroke="#080E18" strokeWidth="1.5" />
+                      <circle cx="450" cy="31" r="5" fill="#00F0FF" stroke="#080E18" strokeWidth="2" />
+
+                      {/* Values */}
+                      <text x="50" y="122" fill="#fff" fontSize="8" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">45</text>
+                      <text x="130" y="108" fill="#fff" fontSize="8" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">80</text>
+                      <text x="210" y="92" fill="#fff" fontSize="8" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">120</text>
+                      <text x="290" y="64" fill="#fff" fontSize="8" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">190</text>
+                      <text x="370" y="44" fill="#fff" fontSize="8" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">240</text>
+                      <text x="450" y="16" fill="#00F0FF" fontSize="9" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">310</text>
+
+                      {/* X-axis Labels */}
+                      <text x="50" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">ENE</text>
+                      <text x="130" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">FEB</text>
+                      <text x="210" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">MAR</text>
+                      <text x="290" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">ABR</text>
+                      <text x="370" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">MAY</text>
+                      <text x="450" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">JUN</text>
+                    </svg>
+                  </div>
+                </div>
+
+                {/* Chart 2: Tournaments Growth */}
+                <div className="bg-beyblade-card border border-white/5 rounded-3xl p-6 space-y-4 clip-cyber-card relative">
+                  <div className="absolute inset-0 tech-grid opacity-5 pointer-events-none"></div>
+                  <div>
+                    <h3 className="font-extrabold text-sm text-white uppercase tracking-wider font-title">Actividad de Torneos</h3>
+                    <p className="text-[10px] text-gray-500 font-esports uppercase tracking-widest">Torneos oficiales por mes</p>
+                  </div>
+                  <div className="pt-2 relative">
+                    <svg viewBox="0 0 500 200" className="w-full h-48 overflow-visible">
+                      <defs>
+                        <linearGradient id="red-glow" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#FF0055" stopOpacity="0.4" />
+                          <stop offset="100%" stopColor="#FF0055" stopOpacity="0.0" />
+                        </linearGradient>
+                        <filter id="glow-r" x="-20%" y="-20%" width="140%" height="140%">
+                          <feGaussianBlur stdDeviation="4" result="blur" />
+                          <feMerge>
+                            <feMergeNode in="blur" />
+                            <feMergeNode in="SourceGraphic" />
+                          </feMerge>
+                        </filter>
+                      </defs>
+                      {/* Gridlines */}
+                      <line x1="40" y1="20" x2="480" y2="20" stroke="rgba(255, 255, 255, 0.03)" />
+                      <line x1="40" y1="65" x2="480" y2="65" stroke="rgba(255, 255, 255, 0.03)" />
+                      <line x1="40" y1="110" x2="480" y2="110" stroke="rgba(255, 255, 255, 0.03)" />
+                      <line x1="40" y1="155" x2="480" y2="155" stroke="rgba(255, 255, 255, 0.08)" />
+                      
+                      {/* Y-axis Labels */}
+                      <text x="18" y="24" fill="rgba(255, 255, 255, 0.3)" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">40</text>
+                      <text x="18" y="69" fill="rgba(255, 255, 255, 0.3)" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">25</text>
+                      <text x="18" y="114" fill="rgba(255, 255, 255, 0.3)" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">10</text>
+                      <text x="18" y="159" fill="rgba(255, 255, 255, 0.3)" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">0</text>
+
+                      {/* Area Fill */}
+                      <path d="M 50 155 L 50 143 C 50 143, 120 131, 130 131 L 210 119 L 290 101 L 370 79 L 450 58 L 450 155 Z" fill="url(#red-glow)" />
+
+                      {/* Line Path with Glow Filter */}
+                      <path d="M 50 143 L 130 131 L 210 119 L 290 101 L 370 79 L 450 58" fill="none" stroke="#FF0055" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" filter="url(#glow-r)" />
+
+                      {/* Dots */}
+                      <circle cx="50" cy="143" r="4.5" fill="#FF0055" stroke="#080E18" strokeWidth="1.5" />
+                      <circle cx="130" cy="131" r="4.5" fill="#FF0055" stroke="#080E18" strokeWidth="1.5" />
+                      <circle cx="210" cy="119" r="4.5" fill="#FF0055" stroke="#080E18" strokeWidth="1.5" />
+                      <circle cx="290" cy="101" r="4.5" fill="#FF0055" stroke="#080E18" strokeWidth="1.5" />
+                      <circle cx="370" cy="79" r="4.5" fill="#FF0055" stroke="#080E18" strokeWidth="1.5" />
+                      <circle cx="450" cy="58" r="5" fill="#FF0055" stroke="#080E18" strokeWidth="2" />
+
+                      {/* Values */}
+                      <text x="50" y="128" fill="#fff" fontSize="8" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">4</text>
+                      <text x="130" y="116" fill="#fff" fontSize="8" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">8</text>
+                      <text x="210" y="104" fill="#fff" fontSize="8" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">12</text>
+                      <text x="290" y="86" fill="#fff" fontSize="8" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">18</text>
+                      <text x="370" y="64" fill="#fff" fontSize="8" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">25</text>
+                      <text x="450" y="43" fill="#FF0055" fontSize="9" fontWeight="black" fontFamily="sans-serif" textAnchor="middle">32</text>
+
+                      {/* X-axis Labels */}
+                      <text x="50" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">ENE</text>
+                      <text x="130" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">FEB</text>
+                      <text x="210" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">MAR</text>
+                      <text x="290" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">ABR</text>
+                      <text x="370" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">MAY</text>
+                      <text x="450" y="177" fill="rgba(255, 255, 255, 0.4)" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">JUN</text>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lists side-by-side (Top Localities, Top Countries, Demographics) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {/* Top Localities */}
+                <div className="bg-beyblade-card border border-white/5 rounded-3xl p-6 space-y-4 clip-cyber-card relative">
+                  <div className="absolute inset-0 tech-grid opacity-5 pointer-events-none"></div>
+                  <h3 className="font-extrabold text-sm text-white uppercase tracking-wider font-title flex items-center gap-1.5">
+                    <MapPin className="h-4.5 w-4.5 text-beyblade-electricCyan text-glow-cyan" /> Top Localidades (UY)
+                  </h3>
+                  <div className="space-y-4 pt-2">
+                    {[
+                      { name: 'Montevideo', count: 180, percentage: 70 },
+                      { name: 'Maldonado', count: 65, percentage: 25 },
+                      { name: 'Las Piedras', count: 40, percentage: 15 },
+                      { name: 'Salto', count: 25, percentage: 10 }
+                    ].map((loc, idx) => (
+                      <div key={idx} className="space-y-1">
+                        <div className="flex justify-between text-[11px] font-bold">
+                          <span className="text-white uppercase tracking-wide">{loc.name}</span>
+                          <span className="text-beyblade-electricCyan font-esports">{loc.count} Jugadores</span>
+                        </div>
+                        <div className="w-full bg-black/40 rounded-full h-2 border border-white/5 overflow-hidden">
+                          <motion.div 
+                            initial={{ width: 0 }}
+                            animate={{ width: `${loc.percentage}%` }}
+                            transition={{ duration: 0.8, delay: idx * 0.1 }}
+                            className="bg-beyblade-electricCyan h-full rounded-full shadow-[0_0_8px_rgba(0,240,255,0.4)]" 
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Top Countries */}
+                <div className="bg-beyblade-card border border-white/5 rounded-3xl p-6 space-y-4 clip-cyber-card relative">
+                  <div className="absolute inset-0 tech-grid opacity-5 pointer-events-none"></div>
+                  <h3 className="font-extrabold text-sm text-white uppercase tracking-wider font-title flex items-center gap-1.5">
+                    <Flag className="h-4.5 w-4.5 text-beyblade-electricRed text-glow-red" /> Actividad por País
+                  </h3>
+                  <div className="space-y-4 pt-2">
+                    {[
+                      { name: 'Uruguay', code: 'UY', count: 310, percentage: 65 },
+                      { name: 'Argentina', code: 'AR', count: 140, percentage: 30 },
+                      { name: 'Brasil', code: 'BR', count: 90, percentage: 20 }
+                    ].map((country, idx) => (
+                      <div key={idx} className="space-y-1">
+                        <div className="flex justify-between text-[11px] font-bold">
+                          <span className="text-white uppercase tracking-wide">{country.name} ({country.code})</span>
+                          <span className="text-beyblade-electricRed font-esports">{country.count} Competidores</span>
+                        </div>
+                        <div className="w-full bg-black/40 rounded-full h-2 border border-white/5 overflow-hidden">
+                          <motion.div 
+                            initial={{ width: 0 }}
+                            animate={{ width: `${country.percentage}%` }}
+                            transition={{ duration: 0.8, delay: idx * 0.1 }}
+                            className="bg-beyblade-electricRed h-full rounded-full shadow-[0_0_8px_rgba(255,0,85,0.4)]" 
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Demographics / League Splits */}
+                <div className="bg-beyblade-card border border-white/5 rounded-3xl p-6 space-y-4 clip-cyber-card relative">
+                  <div className="absolute inset-0 tech-grid opacity-5 pointer-events-none"></div>
+                  <h3 className="font-extrabold text-sm text-white uppercase tracking-wider font-title flex items-center gap-1.5">
+                    <Users className="h-4.5 w-4.5 text-beyblade-gold text-glow-gold" /> Demografía de Liga
+                  </h3>
+                  <div className="space-y-4 pt-2">
+                    <div className="bg-beyblade-darker/60 border border-white/5 rounded-2xl p-4 flex justify-between items-center relative overflow-hidden group">
+                      <div className="z-10">
+                        <span className="text-[9px] text-amber-400 font-black uppercase tracking-wider bg-amber-400/10 border border-amber-400/20 px-2.5 py-0.5 rounded font-esports">Liga Junior (6-14)</span>
+                        <p className="text-2xl font-black text-white mt-1.5 font-title">
+                          {players.filter(p => p.league_id === 'Junior').length || 48}
+                        </p>
+                      </div>
+                      <div className="w-12 h-12 rounded-full border-4 border-amber-400/20 border-t-amber-400 flex items-center justify-center text-xs font-black text-amber-400 font-esports shadow-[0_0_10px_rgba(251,191,36,0.15)] z-10">
+                        {Math.round(((players.filter(p => p.league_id === 'Junior').length || 48) / (players.length || 100)) * 100)}%
+                      </div>
+                    </div>
+                    
+                    <div className="bg-beyblade-darker/60 border border-white/5 rounded-2xl p-4 flex justify-between items-center relative overflow-hidden group">
+                      <div className="z-10">
+                        <span className="text-[9px] text-beyblade-electricCyan font-black uppercase tracking-wider bg-beyblade-electricCyan/10 border border-beyblade-electricCyan/20 px-2.5 py-0.5 rounded font-esports">Liga Open (14+)</span>
+                        <p className="text-2xl font-black text-white mt-1.5 font-title">
+                          {players.filter(p => p.league_id === 'Open').length || 52}
+                        </p>
+                      </div>
+                      <div className="w-12 h-12 rounded-full border-4 border-beyblade-electricCyan/20 border-t-beyblade-electricCyan flex items-center justify-center text-xs font-black text-beyblade-electricCyan font-esports shadow-[0_0_10px_rgba(0,240,255,0.15)] z-10">
+                        {Math.round(((players.filter(p => p.league_id === 'Open').length || 52) / (players.length || 100)) * 100)}%
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 2: Control de Módulos */}
+          {activeSuperTab === 'modules' && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center gap-2 border-b border-white/5 pb-3">
+                <Settings className="h-5.5 w-5.5 text-beyblade-electricCyan" />
+                <h2 className="text-lg font-black text-white uppercase tracking-wide">Módulos Activables</h2>
+              </div>
+              
+              <div className="bg-beyblade-card border border-white/5 rounded-3xl p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {modules.map((m) => (
+                  <div key={m.id} className="flex items-center justify-between p-3.5 bg-beyblade-darker/60 rounded-2xl border border-white/5">
+                    <div>
+                      <h4 className="font-extrabold text-xs text-white">{m.name}</h4>
+                      <p className="text-[10px] text-gray-500 font-mono uppercase">{m.id}</p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleModule(m.id, !m.active)}
+                      className="focus:outline-none transition-colors"
+                    >
+                      {m.active ? (
+                        <ToggleRight className="h-9 w-9 text-beyblade-electricCyan cursor-pointer" />
+                      ) : (
+                        <ToggleLeft className="h-9 w-9 text-gray-600 cursor-pointer" />
+                      )}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Tab 3: Retail & Stock */}
+          {activeSuperTab === 'retail' && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                <h2 className="text-lg font-black text-white uppercase tracking-wide flex items-center gap-2">
+                  <Package className="h-5.5 w-5.5 text-beyblade-gold" /> Inventario y Stock Minorista
+                </h2>
+                <span className="bg-white/5 border border-white/10 px-3 py-1 rounded-xl text-xs font-bold text-gray-400">
+                  Global Hasbro Report
+                </span>
+              </div>
+
+              {/* Stock KPI breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-beyblade-card border border-emerald-500/10 p-5 rounded-2xl flex justify-between items-center">
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-bold uppercase block">Productos Disponibles</span>
+                    <p className="text-2xl font-black text-emerald-400 mt-1">
+                      {allStocks.filter(s => s.stock_status === 'Disponible').length}
+                    </p>
+                  </div>
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                </div>
+                <div className="bg-beyblade-card border border-amber-500/10 p-5 rounded-2xl flex justify-between items-center">
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-bold uppercase block">Pocas Unidades (Low Stock)</span>
+                    <p className="text-2xl font-black text-amber-500 mt-1">
+                      {allStocks.filter(s => s.stock_status === 'Poco stock').length}
+                    </p>
+                  </div>
+                  <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
+                </div>
+                <div className="bg-beyblade-card border border-beyblade-electricRed/10 p-5 rounded-2xl flex justify-between items-center">
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-bold uppercase block">Agotado (Out of Stock)</span>
+                    <p className="text-2xl font-black text-beyblade-electricRed mt-1">
+                      {allStocks.filter(s => s.stock_status === 'Agotado').length}
+                    </p>
+                  </div>
+                  <span className="h-2 w-2 rounded-full bg-beyblade-electricRed animate-pulse"></span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Out of Stock alerts column */}
+                <div className="lg:col-span-1 space-y-4">
+                  <h3 className="font-extrabold text-xs text-gray-400 uppercase tracking-wider">Alertas de Inventario</h3>
+                  <div className="space-y-2.5 max-h-96 overflow-y-auto no-scrollbar">
+                    {allStocks.filter(s => s.stock_status === 'Agotado' || s.stock_status === 'Poco stock').map((stock, idx) => {
+                      const store = stores.find(st => st.id === stock.store_id);
+                      const prod = products.find(p => p.id === stock.product_id);
+                      const isAgotado = stock.stock_status === 'Agotado';
+                      return (
+                        <div key={idx} className={`p-3.5 border rounded-xl flex gap-3 text-xs ${
+                          isAgotado 
+                            ? 'bg-beyblade-electricRed/5 border-beyblade-electricRed/25' 
+                            : 'bg-amber-400/5 border-amber-400/25'
+                        }`}>
+                          <div className={`p-2 rounded-lg h-fit bg-black/40 ${isAgotado ? 'text-beyblade-electricRed' : 'text-amber-500'}`}>
+                            <AlertCircle className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="font-bold text-white">{prod?.name || 'Producto Oficial'}</p>
+                            <p className="text-gray-400 text-[11px] mt-0.5">{store?.name || 'Tienda'}</p>
+                            <p className="text-[9px] font-bold uppercase mt-1">
+                              Estado: <span className={isAgotado ? 'text-beyblade-electricRed' : 'text-amber-400'}>{stock.stock_status}</span>
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {allStocks.filter(s => s.stock_status === 'Agotado' || s.stock_status === 'Poco stock').length === 0 && (
+                      <p className="text-xs text-gray-500 italic py-4">No hay alertas de stock pendientes.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Catalog of certified stores details */}
+                <div className="lg:col-span-2 space-y-4">
+                  <h3 className="font-extrabold text-xs text-gray-400 uppercase tracking-wider">Disponibilidad en Tiendas Certificadas</h3>
+                  <div className="space-y-3.5">
+                    {stores.map((store) => {
+                      const storeStocksList = allStocks.filter(s => s.store_id === store.id);
+                      const dispCount = storeStocksList.filter(s => s.stock_status === 'Disponible').length;
+                      const pocoCount = storeStocksList.filter(s => s.stock_status === 'Poco stock').length;
+                      const agotCount = storeStocksList.filter(s => s.stock_status === 'Agotado').length;
+                      
+                      return (
+                        <div key={store.id} className="bg-beyblade-card border border-white/5 rounded-2xl p-5 space-y-4">
+                          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-white/5 pb-2">
+                            <div>
+                              <h4 className="font-extrabold text-white text-sm">{store.name}</h4>
+                              <p className="text-xs text-gray-400">{store.address} • {store.locality}, {store.country_id}</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[9px] font-black rounded uppercase">{dispCount} Disponibles</span>
+                              <span className="px-2 py-0.5 bg-amber-500/10 text-amber-500 text-[9px] font-black rounded uppercase">{pocoCount} Pocos</span>
+                              <span className="px-2 py-0.5 bg-beyblade-electricRed/10 text-beyblade-electricRed text-[9px] font-black rounded uppercase">{agotCount} Agotados</span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            {storeStocksList.slice(0, 4).map((stock, sIdx) => {
+                              const prod = products.find(p => p.id === stock.product_id);
+                              return (
+                                <div key={sIdx} className="bg-beyblade-darker/60 p-2.5 rounded-xl border border-white/5 flex justify-between items-center">
+                                  <span className="font-bold text-white truncate max-w-[120px]">{prod?.name || 'Producto'}</span>
+                                  <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${
+                                    stock.stock_status === 'Disponible' ? 'bg-emerald-500/10 text-emerald-400' :
+                                    stock.stock_status === 'Poco stock' ? 'bg-amber-500/10 text-amber-500' :
+                                    'bg-beyblade-electricRed/10 text-beyblade-electricRed'
+                                  }`}>
+                                    {stock.stock_status}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                            {storeStocksList.length === 0 && (
+                              <p className="text-[11px] text-gray-500 italic col-span-2">Esta tienda no ha actualizado su inventario.</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* DISTRIBUIDOR PAIS / HASBRO LOCAL REPRESENTATIVE */}
+      {/* ========================================================================= */}
+      {currentUser.role === 'Distribuidor País' && (
+        <div className="space-y-8 animate-fade-in">
+          
+          {/* Sub-tab selection bar */}
+          <div className="flex border-b border-white/5 pb-2">
+            <button
+              onClick={() => setActiveDistributorTab('certifications')}
+              className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                activeDistributorTab === 'certifications'
+                  ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <CheckSquare className="h-4 w-4" /> Acreditaciones y Validación
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveDistributorTab('stats')}
+              className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                activeDistributorTab === 'stats'
+                  ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Map className="h-4 w-4" /> Estadísticas Territoriales
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveDistributorTab('retail')}
+              className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                activeDistributorTab === 'retail'
+                  ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Package className="h-4 w-4" /> Retail País
+              </span>
+            </button>
+          </div>
+
+          {/* Tab 1: Certifications & Validation */}
+          {activeDistributorTab === 'certifications' && (
+            <div className="space-y-8 animate-fade-in">
+              {/* Validating Tournament Placements */}
+              <div className="space-y-4">
+                <h2 className="text-lg font-black text-white uppercase tracking-wide border-b border-white/5 pb-2">
+                  Validación de Resultados ({pendingTournaments.filter(t => t.country_id === currentUser.country_id).length} Pendientes)
+                </h2>
+                {pendingTournaments.filter(t => t.country_id === currentUser.country_id).length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {pendingTournaments.filter(t => t.country_id === currentUser.country_id).map(t => (
+                      <div key={t.id} className="bg-beyblade-card border border-white/5 rounded-2xl p-5 flex flex-col justify-between gap-4">
+                        <div className="space-y-2">
+                          <span className="text-[9px] font-bold text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded uppercase">
+                            Resultados Cargados
+                          </span>
+                          <h3 className="font-extrabold text-white text-sm">{t.name}</h3>
+                          <p className="text-xs text-gray-400">{t.locality} • Liga {t.league_id}</p>
+                        </div>
+                        <button
+                          onClick={() => handleValidateResults(t.id)}
+                          className="w-full py-2.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/80 text-beyblade-darker font-extrabold text-xs uppercase rounded-xl transition-all shadow-neon-cyan"
+                        >
+                          Aprobar y Sumar al Ranking
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500 italic">No hay resultados de torneos pendientes de validación en tu país.</p>
+                )}
+              </div>
+
+              {/* Certifications approvals */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                
+                {/* Store Certifications */}
+                <div className="space-y-4">
+                  <h3 className="font-extrabold text-sm text-white uppercase border-b border-white/5 pb-2">Tiendas en {currentUser.country_id}</h3>
+                  <div className="space-y-3">
+                    {stores.filter(s => s.country_id === currentUser.country_id).map(s => (
+                      <div key={s.id} className="bg-beyblade-card border border-white/5 p-4 rounded-xl flex justify-between items-center text-xs">
+                        <div>
+                          <h4 className="font-bold text-white">{s.name}</h4>
+                          <p className="text-gray-500">{s.locality} • {s.certification_status}</p>
+                        </div>
+                        {s.certification_status === 'Pendiente' && (
+                          <div className="flex gap-1.5">
+                            <button onClick={() => handleStoreApprove(s.id, 'Aprobado')} className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white rounded-lg transition-all"><Check className="h-4 w-4" /></button>
+                            <button onClick={() => handleStoreApprove(s.id, 'Rechazado')} className="p-1.5 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed text-beyblade-electricRed hover:text-white rounded-lg transition-all"><X className="h-4 w-4" /></button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {stores.filter(s => s.country_id === currentUser.country_id).length === 0 && (
+                      <p className="text-xs text-gray-500 italic">No hay tiendas registradas en tu país.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Organizer Certifications */}
+                <div className="space-y-4">
+                  <h3 className="font-extrabold text-sm text-white uppercase border-b border-white/5 pb-2">Organizadores</h3>
+                  <div className="space-y-3">
+                    {organizers.filter(o => o.country_id === currentUser.country_id).map(o => (
+                      <div key={o.id} className="bg-beyblade-card border border-white/5 p-4 rounded-xl flex justify-between items-center text-xs">
+                        <div>
+                          <h4 className="font-bold text-white">{o.name}</h4>
+                          <p className="text-gray-500">{o.level} • {o.status}</p>
+                        </div>
+                        {o.status === 'Pendiente' && (
+                          <div className="flex gap-1.5">
+                            <button onClick={() => handleOrganizerApprove(o.id, 'Aprobado')} className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white rounded-lg transition-all"><Check className="h-4 w-4" /></button>
+                            <button onClick={() => handleOrganizerApprove(o.id, 'Rechazado')} className="p-1.5 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed text-beyblade-electricRed hover:text-white rounded-lg transition-all"><X className="h-4 w-4" /></button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {organizers.filter(o => o.country_id === currentUser.country_id).length === 0 && (
+                      <p className="text-xs text-gray-500 italic">No hay organizadores registrados en tu país.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Judges Certifications */}
+                <div className="space-y-4">
+                  <h3 className="font-extrabold text-sm text-white uppercase border-b border-white/5 pb-2">Jueces</h3>
+                  <div className="space-y-3">
+                    {judges.filter(j => j.country_id === currentUser.country_id).map(j => (
+                      <div key={j.id} className="bg-beyblade-card border border-white/5 p-4 rounded-xl flex justify-between items-center text-xs">
+                        <div>
+                          <h4 className="font-bold text-white">{j.name}</h4>
+                          <p className="text-gray-500">Estado: {j.status}</p>
+                        </div>
+                        {j.status === 'Pendiente' && (
+                          <div className="flex gap-1.5">
+                            <button onClick={() => handleJudgeApprove(j.id, 'Aprobado')} className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white rounded-lg transition-all"><Check className="h-4 w-4" /></button>
+                            <button onClick={() => handleJudgeApprove(j.id, 'Rechazado')} className="p-1.5 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed text-beyblade-electricRed hover:text-white rounded-lg transition-all"><X className="h-4 w-4" /></button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {judges.filter(j => j.country_id === currentUser.country_id).length === 0 && (
+                      <p className="text-xs text-gray-500 italic">No hay jueces registrados en tu país.</p>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          )}
+
+          {/* Tab 2: Estadísticas Territoriales */}
+          {activeDistributorTab === 'stats' && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="border-b border-white/5 pb-3">
+                <h3 className="font-extrabold text-sm text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <Map className="h-4.5 w-4.5 text-beyblade-electricCyan" /> Mapa de Actividad Nacional ({currentUser.country_id})
+                </h3>
+                <p className="text-xs text-gray-400">Distribución territorial de ligas y competencia</p>
+              </div>
+
+              {currentUser.country_id === 'UY' ? (
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 items-start">
+                  {/* Interactive SVG map of Uruguay */}
+                  <div className="lg:col-span-3 bg-beyblade-card border border-white/5 p-6 rounded-3xl flex items-center justify-center">
+                    <svg viewBox="0 0 350 330" className="w-full max-w-sm h-auto overflow-visible select-none">
+                      {/* Grid background */}
+                      <g opacity="0.15">
+                        <line x1="10" y1="50" x2="340" y2="50" stroke="#00F0FF" strokeWidth="0.5" />
+                        <line x1="10" y1="100" x2="340" y2="100" stroke="#00F0FF" strokeWidth="0.5" />
+                        <line x1="10" y1="150" x2="340" y2="150" stroke="#00F0FF" strokeWidth="0.5" />
+                        <line x1="10" y1="200" x2="340" y2="200" stroke="#00F0FF" strokeWidth="0.5" />
+                        <line x1="10" y1="250" x2="340" y2="250" stroke="#00F0FF" strokeWidth="0.5" />
+                        <line x1="50" y1="10" x2="50" y2="320" stroke="#00F0FF" strokeWidth="0.5" />
+                        <line x1="100" y1="10" x2="100" y2="320" stroke="#00F0FF" strokeWidth="0.5" />
+                        <line x1="150" y1="10" x2="150" y2="320" stroke="#00F0FF" strokeWidth="0.5" />
+                        <line x1="200" y1="10" x2="200" y2="320" stroke="#00F0FF" strokeWidth="0.5" />
+                        <line x1="255" y1="10" x2="255" y2="320" stroke="#00F0FF" strokeWidth="0.5" />
+                        <line x1="300" y1="10" x2="300" y2="320" stroke="#00F0FF" strokeWidth="0.5" />
+                      </g>
+
+                      {/* Department Polygons */}
+                      {[
+                        { name: 'Artigas', points: '180,20 230,20 220,50 170,40' },
+                        { name: 'Salto', points: '130,50 180,50 170,100 120,95' },
+                        { name: 'Rivera', points: '230,20 280,30 260,80 210,70' },
+                        { name: 'Paysandú', points: '120,95 170,100 160,150 110,145' },
+                        { name: 'Tacuarembó', points: '180,50 230,70 210,120 170,100' },
+                        { name: 'Cerro Largo', points: '260,80 310,90 290,140 240,130' },
+                        { name: 'Río Negro', points: '110,145 160,150 150,195 100,190' },
+                        { name: 'Durazno', points: '160,150 210,155 200,200 150,195' },
+                        { name: 'Treinta y Tres', points: '240,130 290,140 280,185 230,175' },
+                        { name: 'Soriano', points: '90,190 140,195 130,240 80,235' },
+                        { name: 'Flores', points: '140,195 170,195 160,230 130,230' },
+                        { name: 'Florida', points: '170,195 210,200 200,245 160,240' },
+                        { name: 'Lavalleja', points: '210,200 250,210 240,260 200,250' },
+                        { name: 'Rocha', points: '260,230 300,240 280,290 240,280' },
+                        { name: 'Colonia', points: '80,235 130,240 120,280 70,270' },
+                        { name: 'San José', points: '130,240 160,245 150,285 120,280' },
+                        { name: 'Canelones', points: '160,245 200,250 190,290 150,285' },
+                        { name: 'Maldonado', points: '200,250 240,260 230,300 190,295' },
+                        { name: 'Montevideo', points: '165,285 185,285 180,300 160,300' }
+                      ].map((dept) => {
+                        const isSelected = selectedDepartment?.toLowerCase() === dept.name.toLowerCase();
+                        // Filter by country and locality/department
+                        const pCount = players.filter(p => p.country_id === 'UY' && p.department?.toLowerCase() === dept.name.toLowerCase()).length;
+                        const tCount = tournaments.filter(t => t.country_id === 'UY' && t.department?.toLowerCase() === dept.name.toLowerCase()).length;
+                        const hasActivity = pCount > 0 || tCount > 0;
+
+                        return (
+                          <g key={dept.name} className="cursor-pointer" onClick={() => setSelectedDepartment(dept.name)}>
+                            <polygon
+                              points={dept.points}
+                              className={`transition-all duration-300 ${
+                                isSelected
+                                  ? 'fill-beyblade-electricRed/30 stroke-beyblade-electricRed stroke-2'
+                                  : hasActivity
+                                    ? 'fill-beyblade-electricCyan/15 stroke-beyblade-electricCyan/60 hover:fill-beyblade-electricCyan/25'
+                                    : 'fill-beyblade-darker/60 stroke-white/10 hover:fill-white/5'
+                              }`}
+                            />
+                            {/* Selected Label tooltip overlay */}
+                            {isSelected && (
+                              <g className="pointer-events-none">
+                                <rect
+                                  x={Number(dept.points.split(' ')[0].split(',')[0]) - 10}
+                                  y={Number(dept.points.split(' ')[0].split(',')[1]) - 18}
+                                  width="65"
+                                  height="15"
+                                  rx="4"
+                                  fill="#02050a"
+                                  stroke="#00F0FF"
+                                  strokeWidth="1"
+                                />
+                                <text
+                                  x={Number(dept.points.split(' ')[0].split(',')[0]) + 22.5}
+                                  y={Number(dept.points.split(' ')[0].split(',')[1]) - 7}
+                                  fill="#fff"
+                                  fontSize="7"
+                                  fontWeight="black"
+                                  textAnchor="middle"
+                                >
+                                  {dept.name}
+                                </text>
+                              </g>
+                            )}
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  </div>
+
+                  {/* Sidebar Detail of clicked department */}
+                  <div className="lg:col-span-2 bg-beyblade-card border border-white/5 p-6 rounded-3xl space-y-5">
+                    {selectedDepartment ? (
+                      <div className="space-y-4">
+                        <div className="border-b border-white/5 pb-2">
+                          <h4 className="font-extrabold text-white text-base">{selectedDepartment}</h4>
+                          <span className="text-[10px] text-gray-500 font-bold uppercase">Reporte Territorial Activo</span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-beyblade-darker/60 border border-white/5 p-4 rounded-xl">
+                            <span className="text-[9px] text-gray-500 font-bold uppercase">Jugadores</span>
+                            <p className="text-xl font-black text-beyblade-electricCyan mt-1">
+                              {players.filter(p => p.country_id === 'UY' && p.department?.toLowerCase() === selectedDepartment.toLowerCase()).length}
+                            </p>
+                          </div>
+                          <div className="bg-beyblade-darker/60 border border-white/5 p-4 rounded-xl">
+                            <span className="text-[9px] text-gray-500 font-bold uppercase">Torneos</span>
+                            <p className="text-xl font-black text-beyblade-electricRed mt-1">
+                              {tournaments.filter(t => t.country_id === 'UY' && t.department?.toLowerCase() === selectedDepartment.toLowerCase()).length}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block">Competidores Activos</span>
+                          <div className="divide-y divide-white/5 max-h-40 overflow-y-auto no-scrollbar bg-beyblade-darker/30 border border-white/5 rounded-xl px-3">
+                            {players
+                              .filter(p => p.country_id === 'UY' && p.department?.toLowerCase() === selectedDepartment.toLowerCase())
+                              .map((p, idx) => (
+                                <div key={idx} className="py-2.5 flex justify-between text-xs">
+                                  <span className="text-white font-bold">{p.first_name} {p.last_name}</span>
+                                  <span className="text-gray-500 font-mono text-[10px]">Liga {p.league_id}</span>
+                                </div>
+                              ))}
+                            {players.filter(p => p.country_id === 'UY' && p.department?.toLowerCase() === selectedDepartment.toLowerCase()).length === 0 && (
+                              <p className="text-xs text-gray-500 italic py-4 text-center">No hay jugadores registrados en esta zona.</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => setSelectedDepartment(null)}
+                          className="w-full py-2 bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-xs uppercase rounded-xl transition-all"
+                        >
+                          Limpiar Filtro
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-center py-12 space-y-3">
+                        <Map className="h-8 w-8 text-gray-600 mx-auto" />
+                        <p className="text-xs text-gray-400 font-bold uppercase">Selecciona una Zona</p>
+                        <p className="text-[11px] text-gray-500 max-w-xs mx-auto leading-relaxed">
+                          Haz clic sobre un departamento del mapa interactivo de Uruguay para auditar las métricas de jugadores e historia de torneos correspondientes.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-beyblade-card border border-white/5 p-8 rounded-3xl text-center text-gray-500 text-xs italic">
+                  Mapa de calor y estadísticas por departamentos solo disponible para Uruguay (Piloto Principal).
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab 3: Retail País */}
+          {activeDistributorTab === 'retail' && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                <h3 className="font-extrabold text-sm text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <Package className="h-4.5 w-4.5 text-beyblade-gold" /> Inventario de Tiendas ({currentUser.country_id})
+                </h3>
+              </div>
+
+              {/* Inventory stats */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-beyblade-card border border-white/5 p-4 rounded-xl">
+                  <span className="text-[10px] text-gray-500 font-bold uppercase block">Disponibles</span>
+                  <p className="text-2xl font-black text-emerald-400 mt-1">
+                    {allStocks.filter(s => {
+                      const store = stores.find(st => st.id === s.store_id);
+                      return s.stock_status === 'Disponible' && store?.country_id === currentUser.country_id;
+                    }).length}
+                  </p>
+                </div>
+                <div className="bg-beyblade-card border border-white/5 p-4 rounded-xl">
+                  <span className="text-[10px] text-gray-500 font-bold uppercase block">Pocas Unidades</span>
+                  <p className="text-2xl font-black text-amber-500 mt-1">
+                    {allStocks.filter(s => {
+                      const store = stores.find(st => st.id === s.store_id);
+                      return s.stock_status === 'Poco stock' && store?.country_id === currentUser.country_id;
+                    }).length}
+                  </p>
+                </div>
+                <div className="bg-beyblade-card border border-white/5 p-4 rounded-xl">
+                  <span className="text-[10px] text-gray-500 font-bold uppercase block">Agotado</span>
+                  <p className="text-2xl font-black text-beyblade-electricRed mt-1">
+                    {allStocks.filter(s => {
+                      const store = stores.find(st => st.id === s.store_id);
+                      return s.stock_status === 'Agotado' && store?.country_id === currentUser.country_id;
+                    }).length}
+                  </p>
+                </div>
+              </div>
+
+              {/* Local retail list details */}
+              <div className="space-y-4">
+                <h3 className="font-extrabold text-xs text-gray-400 uppercase tracking-wider">Tiendas Certificadas y Disponibilidad</h3>
+                <div className="space-y-3">
+                  {stores.filter(st => st.country_id === currentUser.country_id).map((store) => {
+                    const storeStocksList = allStocks.filter(s => s.store_id === store.id);
+                    return (
+                      <div key={store.id} className="bg-beyblade-card border border-white/5 rounded-2xl p-5 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                        <div>
+                          <h4 className="font-extrabold text-white text-sm">{store.name}</h4>
+                          <p className="text-xs text-gray-400">{store.address} • {store.locality}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[9px] font-black rounded uppercase">
+                            {storeStocksList.filter(s => s.stock_status === 'Disponible').length} Disponibles
+                          </span>
+                          <span className="px-2 py-0.5 bg-beyblade-electricRed/10 text-beyblade-electricRed text-[9px] font-black rounded uppercase">
+                            {storeStocksList.filter(s => s.stock_status === 'Agotado').length} Agotados
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {stores.filter(st => st.country_id === currentUser.country_id).length === 0 && (
+                    <p className="text-xs text-gray-500 italic py-4 text-center">No hay locales registrados en tu país.</p>
+                  )}
+                </div>
+              </div>
+
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* ORGANIZADOR CERTIFICADO PANEL */}
+      {/* ========================================================================= */}
+      {currentUser.role === 'Organizador' && (
+        <div className="space-y-8">
+          
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-white/5 pb-4">
+            <div className="flex gap-4">
+              <button
+                type="button"
+                onClick={() => setOrganizerTab('tournaments')}
+                className={`text-lg font-black uppercase tracking-wide transition-all ${
+                  organizerTab === 'tournaments' ? 'text-white border-b-2 border-beyblade-electricCyan pb-1' : 'text-gray-500 hover:text-white'
+                }`}
+              >
+                Torneos Competitivos
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrganizerTab('journeys')}
+                className={`text-lg font-black uppercase tracking-wide transition-all ${
+                  organizerTab === 'journeys' ? 'text-white border-b-2 border-beyblade-electricCyan pb-1' : 'text-gray-500 hover:text-white'
+                }`}
+              >
+                Jornadas Piloto
+              </button>
+            </div>
+            
+            {organizerTab === 'tournaments' ? (
+              <button
+                onClick={() => setIsCreatingTournament(!isCreatingTournament)}
+                className="px-4 py-2 bg-beyblade-electricCyan text-beyblade-darker font-bold text-xs uppercase rounded-lg flex items-center gap-1 hover:bg-beyblade-electricCyan/80 transition-all"
+              >
+                <Plus className="h-4 w-4" /> {isCreatingTournament ? 'Cancelar' : 'Crear Torneo'}
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsCreatingJourney(!isCreatingJourney)}
+                className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white font-bold text-xs uppercase rounded-lg flex items-center gap-1 transition-all"
+              >
+                <Plus className="h-4 w-4" /> {isCreatingJourney ? 'Cancelar' : 'Crear Jornada'}
+              </button>
+            )}
+          </div>
+
+          {/* Creation Form */}
+          {organizerTab === 'tournaments' && isCreatingTournament && (
+            <form onSubmit={handleCreateTournament} className="bg-beyblade-card border border-beyblade-electricCyan/30 p-6 rounded-3xl space-y-4 animate-slide-in">
+              <h3 className="font-bold text-sm text-white uppercase tracking-wide">Crear Nuevo Torneo Competitivo</h3>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-bold uppercase">Nombre del Torneo *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newTourName}
+                    onChange={(e) => setNewTourName(e.target.value)}
+                    placeholder="Ej. Copa Invierno Montevideo"
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-bold uppercase">Liga Competitiva *</label>
+                  <select
+                    value={newTourLeague}
+                    onChange={(e) => setNewTourLeague(e.target.value as any)}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                  >
+                    <option value="Junior">Liga Junior (6-14)</option>
+                    <option value="Open">Liga Open (14+)</option>
+                    <option value="Ambas">Ambas Ligas</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-gray-400 font-bold uppercase">Dirección / Ubicación del Torneo *</label>
+                <LocationAutocomplete
+                  countryCode={currentUser.country_id}
+                  onSelect={(loc) => {
+                    setErrorMsg('');
+                    setNewTourLocation(loc);
+                  }}
+                  placeholder="Busca una dirección o lugar (ej: Montevideo Shopping, Av. 18 de Julio 1234...)"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-bold uppercase">Fecha *</label>
+                  <input
+                    type="date"
+                    required
+                    value={newTourDate}
+                    onChange={(e) => setNewTourDate(e.target.value)}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-bold uppercase">Hora *</label>
+                  <input
+                    type="time"
+                    required
+                    value={newTourTime}
+                    onChange={(e) => setNewTourTime(e.target.value)}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-bold uppercase">Cupos Totales *</label>
+                  <input
+                    type="number"
+                    required
+                    value={newTourSlots}
+                    onChange={(e) => setNewTourSlots(Number(e.target.value))}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-bold uppercase">Formato *</label>
+                  <select
+                    value={newTourFormat}
+                    onChange={(e) => setNewTourFormat(e.target.value as any)}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                  >
+                    <option value="Eliminación Directa">Eliminación Directa</option>
+                    <option value="Suizo">Suizo</option>
+                    <option value="Round Robin">Round Robin</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-bold uppercase">Juez Asignado</label>
+                  <select
+                    value={newTourJudgeId}
+                    onChange={(e) => setNewTourJudgeId(e.target.value)}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                  >
+                    <option value="">Seleccionar Juez Aprobado</option>
+                    {judges.filter(j => j.status === 'Aprobado').map(j => (
+                      <option key={j.id} value={j.id}>{j.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-bold uppercase">Descripción</label>
+                  <input
+                    type="text"
+                    value={newTourDesc}
+                    onChange={(e) => setNewTourDesc(e.target.value)}
+                    placeholder="Detalles sobre reglamento, premios..."
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-3 bg-beyblade-electricCyan text-beyblade-darker font-extrabold text-xs uppercase rounded-xl shadow-neon-cyan hover:bg-beyblade-electricCyan/80 transition-all"
+              >
+                Crear y Publicar Torneo Oficial
+              </button>
+            </form>
+          )}
+
+          {/* List of my tournaments for management */}
+          {organizerTab === 'tournaments' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Tournaments Select list */}
+            <div className="space-y-3 lg:col-span-1">
+              <h3 className="text-xs text-gray-400 font-bold uppercase tracking-wider">Gestionar Eventos</h3>
+              {tournaments.filter(t => t.organizer_id === currentUser.id).map(t => (
+                <div
+                  key={t.id}
+                  onClick={() => handleSelectManageTournament(t)}
+                  className={`bg-beyblade-card border p-4 rounded-xl cursor-pointer transition-all ${
+                    selectedManageTour?.id === t.id ? 'border-beyblade-electricCyan' : 'border-white/5 hover:border-white/10'
+                  }`}
+                >
+                  <h4 className="font-extrabold text-white text-xs">{t.name}</h4>
+                  <p className="text-[10px] text-gray-500 mt-1">Estado: {t.status} • Liga: {t.league_id}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Tournament Management Controls (Check-in & Placements loading) */}
+            <div className="lg:col-span-2">
+              {selectedManageTour ? (
+                <div className="bg-beyblade-card border border-white/5 rounded-3xl p-6 space-y-6">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                      <h3 className="font-extrabold text-sm text-white uppercase">{selectedManageTour.name}</h3>
+                      <p className="text-xs text-gray-500">Módulo de Check-in y Registro de Resultados</p>
+                    </div>
+                    {selectedManageTour.status !== 'finalizado' && (
+                      <button
+                        onClick={() => {
+                          setIsScanningQR(true);
+                          setScanResult(null);
+                        }}
+                        className="px-4 py-2.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/80 text-beyblade-darker font-bold text-xs uppercase rounded-xl transition-all flex items-center gap-1.5 shadow-neon-cyan shrink-0"
+                      >
+                        <Camera className="h-4 w-4" /> Acreditar por QR
+                      </button>
+                    )}
+                  </div>
+
+                  {isScanningQR && (
+                    <div className="space-y-4 p-4 bg-beyblade-darker/60 border border-white/5 rounded-2xl">
+                      {/* Mode Toggle */}
+                      <div className="flex bg-beyblade-darker p-1 rounded-xl border border-white/5 mb-4 self-start w-fit">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScannerMode('camera');
+                            setScanResult(null);
+                          }}
+                          className={`px-3 py-1.5 rounded-lg font-bold text-[10px] uppercase transition-colors ${
+                            scannerMode === 'camera' 
+                              ? 'bg-beyblade-electricCyan text-beyblade-darker' 
+                              : 'text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          Cámara Real
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScannerMode('demo');
+                            setScanResult(null);
+                          }}
+                          className={`px-3 py-1.5 rounded-lg font-bold text-[10px] uppercase transition-colors ${
+                            scannerMode === 'demo' 
+                              ? 'bg-beyblade-electricCyan text-beyblade-darker' 
+                              : 'text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          Simulador Demo
+                        </button>
+                      </div>
+
+                      {scannerMode === 'camera' ? (
+                        <RealQRScanner 
+                          onScanSuccess={handleQRScanSuccess}
+                          onScanError={(msg) => {
+                            setScanResult({
+                              success: false,
+                              error: 'scan_error',
+                              message: msg
+                            });
+                          }}
+                          onClose={() => {
+                            setIsScanningQR(false);
+                            setScanResult(null);
+                          }}
+                        />
+                      ) : (
+                        <QRScanner 
+                          registrations={manageRegistrations}
+                          onScanSuccess={handleQRScanSuccess}
+                          onClose={() => {
+                            setIsScanningQR(false);
+                            setScanResult(null);
+                          }}
+                        />
+                      )}
+                      
+                      {scanResult && (
+                        <div className="bg-beyblade-dark border border-white/5 p-4 rounded-xl space-y-3 animate-slide-in">
+                          {scanResult.success ? (
+                            <div className="space-y-2 text-left">
+                              <div className="flex items-center gap-2 text-emerald-400 font-extrabold text-xs uppercase">
+                                <Check className="h-4.5 w-4.5" /> Jugador encontrado
+                              </div>
+                              <p className="text-xs text-gray-300">
+                                Nombre: <strong className="text-white">{scanResult.nombre}</strong> <br />
+                                Torneo: <strong className="text-white">{selectedManageTour.name}</strong> <br />
+                                Estado: <span className="text-emerald-400 font-bold">Inscripto - Acreditación pendiente</span>
+                              </p>
+                              <button
+                                onClick={handleConfirmQRCheckIn}
+                                className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-xs uppercase rounded-xl transition-all"
+                              >
+                                [ Confirmar Check-In ]
+                              </button>
+                            </div>
+                          ) : scanResult.warning ? (
+                            <div className="space-y-2 text-left">
+                              <div className="flex items-center gap-2 text-amber-400 font-extrabold text-xs uppercase">
+                                <AlertCircle className="h-4.5 w-4.5" /> Check-in ya registrado
+                              </div>
+                              <p className="text-xs text-gray-300">
+                                El jugador <strong className="text-white">{scanResult.nombre}</strong> ya tiene su asistencia confirmada en la lista.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2 text-left">
+                              <div className="flex items-center gap-2 text-beyblade-electricRed font-extrabold text-xs uppercase">
+                                <X className="h-4.5 w-4.5" /> Jugador no inscripto
+                              </div>
+                              <p className="text-xs text-gray-300">{scanResult.message}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Registrants list with Check-In checkboxes */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5"><CheckSquare className="h-4 w-4" /> Check-in de Jugadores</h4>
+                    <div className="divide-y divide-white/5 bg-beyblade-dark rounded-xl border border-white/5 overflow-hidden">
+                      {manageRegistrations.map((r) => (
+                        <div key={r.id} className="p-3 flex items-center justify-between text-xs">
+                          <span className="font-bold text-white">{r.player_name}</span>
+                          <label className="flex items-center gap-2 cursor-pointer select-none text-gray-400">
+                            <input
+                              type="checkbox"
+                              checked={r.checked_in}
+                              onChange={(e) => handleCheckInToggle(r.id, e.target.checked)}
+                              className="rounded border-white/10 text-beyblade-electricCyan bg-beyblade-darker focus:ring-0"
+                            />
+                            Presente
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Placements entries */}
+                  {selectedManageTour.status !== 'finalizado' && (
+                    <div className="space-y-4 pt-2">
+                      <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5"><Trophy className="h-4 w-4" /> Cargar Resultados del Torneo</h4>
+                      <p className="text-[10px] text-gray-500">Especifica el puesto obtenido por cada jugador presente. (1º, 2º, 3º, 4º sumarán puntos específicos. 5º+ sumará 1 punto por asistencia).</p>
+                      
+                      <div className="space-y-2 bg-beyblade-dark rounded-xl border border-white/5 p-4">
+                        {manageRegistrations.filter(r => r.checked_in).map(r => (
+                          <div key={r.id} className="flex justify-between items-center text-xs">
+                            <span className="text-white font-bold">{r.player_name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-gray-500 font-bold uppercase">Puesto:</span>
+                              <input
+                                type="number"
+                                min="1"
+                                value={placements[r.player_id] || ''}
+                                onChange={(e) => setPlacements({ ...placements, [r.player_id]: Number(e.target.value) })}
+                                className="w-16 bg-beyblade-darker border border-white/10 rounded-lg px-2 py-1 text-center font-bold text-white"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <button
+                        onClick={handleSavePlacements}
+                        className="w-full py-3 bg-beyblade-electricRed text-white font-extrabold text-xs uppercase rounded-xl shadow-neon-red hover:bg-beyblade-electricRed/80 transition-all"
+                      >
+                        Enviar Posiciones al Distribuidor
+                      </button>
+                    </div>
+                  )}
+
+                </div>
+              ) : (
+                <div className="bg-beyblade-card border border-white/5 rounded-3xl p-12 text-center text-gray-500 text-xs italic">
+                  Selecciona un torneo de la izquierda para tomar asistencia o ingresar resultados.
+                </div>
+              )}
+            </div>
+          </div>
+          )}
+
+          {/* Journey Creation Form */}
+          {organizerTab === 'journeys' && isCreatingJourney && (
+            <form onSubmit={handleCreateJourney} className="bg-beyblade-card border border-purple-500/30 p-6 rounded-3xl space-y-4 animate-slide-in">
+              <h3 className="font-bold text-sm text-white uppercase tracking-wide">Crear Nueva Jornada de Entrenamiento / Taller</h3>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-bold uppercase">Título de la Jornada *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newJourneyTitle}
+                    onChange={(e) => setNewJourneyTitle(e.target.value)}
+                    placeholder="Ej. Taller de Lanzamientos y Customización"
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-gray-400 font-bold uppercase">Fecha *</label>
+                    <input
+                      type="date"
+                      required
+                      value={newJourneyDate}
+                      onChange={(e) => setNewJourneyDate(e.target.value)}
+                      className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-gray-400 font-bold uppercase">Hora *</label>
+                    <input
+                      type="time"
+                      required
+                      value={newJourneyTime}
+                      onChange={(e) => setNewJourneyTime(e.target.value)}
+                      className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-gray-400 font-bold uppercase">Dirección / Ubicación de la Jornada *</label>
+                <LocationAutocomplete
+                  countryCode={currentUser.country_id}
+                  onSelect={(loc) => {
+                    setErrorMsg('');
+                    setNewJourneyLocation(loc);
+                  }}
+                  placeholder="Busca la plaza, parque o club (ej: Parque Rodó, Club Fénix...)"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-gray-400 font-bold uppercase">Descripción de la Jornada</label>
+                <textarea
+                  value={newJourneyDesc}
+                  onChange={(e) => setNewJourneyDesc(e.target.value)}
+                  placeholder="Detalla de qué trata la jornada: traer estadios, repuestos, libre para todas las edades, etc."
+                  rows={3}
+                  className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-3 bg-purple-500 hover:bg-purple-600 text-white font-extrabold text-xs uppercase rounded-xl transition-all shadow-lg hover:shadow-purple-500/20"
+              >
+                Crear y Publicar Jornada Oficial
+              </button>
+            </form>
+          )}
+
+          {/* Journeys List */}
+          {organizerTab === 'journeys' && (
+            <div className="space-y-4">
+              <h3 className="text-xs text-gray-400 font-bold uppercase tracking-wider">Jornadas Creadas</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {journeys.filter(j => j.created_by === currentUser.id).map(j => (
+                  <div key={j.id} className="bg-beyblade-card border border-white/5 p-5 rounded-2xl space-y-3">
+                    <div className="flex justify-between items-start">
+                      <span className="px-2 py-0.5 bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[9px] font-black rounded uppercase">
+                        Jornada
+                      </span>
+                      <span className="text-[10px] text-gray-500 font-bold">
+                        {new Date(j.starts_at).toLocaleDateString()} {new Date(j.starts_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <h4 className="font-extrabold text-white text-sm">{j.title}</h4>
+                    {j.description && <p className="text-xs text-gray-400 line-clamp-2">{j.description}</p>}
+                    <div className="flex items-center gap-1.5 text-[11px] text-gray-500 pt-1">
+                      <MapPin className="h-3.5 w-3.5 text-purple-450 shrink-0" />
+                      <span className="truncate">{j.address}</span>
+                    </div>
+                  </div>
+                ))}
+                {journeys.filter(j => j.created_by === currentUser.id).length === 0 && (
+                  <p className="text-xs text-gray-500 italic py-6 col-span-full text-center">No has creado jornadas aún.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TIENDA CERTIFICADA PANEL */}
+      {/* ========================================================================= */}
+      {currentUser.role === 'Tienda' && myStore && (
+        <div className="space-y-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+            
+            {/* Update shop profile */}
+            <form onSubmit={handleSaveStoreProfile} className="bg-beyblade-card border border-white/5 rounded-3xl p-6 space-y-4 lg:col-span-1">
+              <h3 className="font-extrabold text-sm text-white uppercase border-b border-white/5 pb-2">Información del Local</h3>
+              <div className="space-y-3 text-xs">
+                <div className="space-y-1.5">
+                  <label className="text-gray-400 font-bold uppercase">Nombre Comercial</label>
+                  <input
+                    type="text"
+                    value={myStore.name}
+                    onChange={(e) => setMyStore({ ...myStore, name: e.target.value })}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2 px-3 text-white"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-gray-400 font-bold uppercase">Dirección Física (Buscar Ubicación) *</label>
+                  <LocationAutocomplete
+                    countryCode={myStore.country_id}
+                    initialAddress={myStore.full_address || myStore.address}
+                    initialCoords={myStore.latitude && myStore.longitude ? { lat: myStore.latitude, lng: myStore.longitude } : undefined}
+                    onSelect={(loc) => {
+                      const selectedCountry = loc.country_code?.toUpperCase();
+                      const storeCountry = myStore.country_id?.toUpperCase();
+                      
+                      if (selectedCountry && storeCountry && selectedCountry !== storeCountry) {
+                        setErrorMsg(`La ubicación seleccionada (${selectedCountry}) no corresponde al país de la tienda (${storeCountry}).`);
+                        return;
+                      }
+                      
+                      setErrorMsg('');
+                      setMyStore({
+                        ...myStore,
+                        address: loc.address || loc.full_address,
+                        full_address: loc.full_address,
+                        department: loc.department || myStore.department,
+                        locality: loc.locality || myStore.locality,
+                        latitude: loc.latitude,
+                        longitude: loc.longitude,
+                        geocoding_provider: loc.geocoding_provider,
+                        osm_place_id: loc.osm_place_id,
+                        osm_type: loc.osm_type,
+                        osm_class: loc.osm_class,
+                        osm_importance: loc.osm_importance,
+                        geocoded_at: new Date().toISOString()
+                      });
+                    }}
+                    placeholder="Busca la ubicación oficial de tu tienda..."
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-gray-400 font-bold uppercase">Horario de Atención</label>
+                  <input
+                    type="text"
+                    value={myStore.hours}
+                    onChange={(e) => setMyStore({ ...myStore, hours: e.target.value })}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2 px-3 text-white"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-gray-400 font-bold uppercase">Teléfono de Contacto</label>
+                  <input
+                    type="text"
+                    value={myStore.phone || ''}
+                    onChange={(e) => setMyStore({ ...myStore, phone: e.target.value })}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2 px-3 text-white"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-gray-400 font-bold uppercase">Enlace Web</label>
+                  <input
+                    type="text"
+                    value={myStore.web_url || ''}
+                    onChange={(e) => setMyStore({ ...myStore, web_url: e.target.value })}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2 px-3 text-white"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-gray-400 font-bold uppercase">Instagram</label>
+                  <input
+                    type="text"
+                    value={myStore.instagram || ''}
+                    onChange={(e) => setMyStore({ ...myStore, instagram: e.target.value })}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2 px-3 text-white"
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                className="w-full py-2.5 bg-beyblade-electricCyan text-beyblade-darker font-bold text-xs uppercase rounded-xl transition-all"
+              >
+                Guardar Cambios
+              </button>
+            </form>
+
+            {/* Inventory stock manager */}
+            <div className="bg-beyblade-card border border-white/5 rounded-3xl p-6 lg:col-span-2 space-y-4">
+              <h3 className="font-extrabold text-sm text-white uppercase border-b border-white/5 pb-2">Control de Stock Oficial</h3>
+              <div className="divide-y divide-white/5 text-xs">
+                {storeStocks.map(stock => (
+                  <div key={stock.product_id} className="py-3 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                    <div>
+                      <h4 className="font-extrabold text-white">{stock.productName}</h4>
+                      <p className="text-gray-500 font-mono text-[9px]">{stock.product_id}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-500 font-bold uppercase">Disponibilidad:</span>
+                      <select
+                        value={stock.stock_status}
+                        onChange={(e) => handleUpdateStock(stock.product_id, e.target.value as any)}
+                        className="bg-beyblade-dark border border-white/10 rounded-lg px-2 py-1 text-xs text-white"
+                      >
+                        <option value="Disponible">Disponible</option>
+                        <option value="Poco stock">Poco stock</option>
+                        <option value="Agotado">Agotado</option>
+                        <option value="Proximamente">Próximamente</option>
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* VISITANTE / JUGADOR FALLBACK DASHBOARD INFO */}
+      {/* ========================================================================= */}
+      {(currentUser.role === 'Jugador' || currentUser.role === 'Visitante') && (
+        <div className="max-w-md mx-auto bg-beyblade-card border border-white/5 rounded-3xl p-8 text-center space-y-4">
+          <Settings className="h-12 w-12 text-beyblade-electricCyan mx-auto" />
+          <h2 className="text-xl font-bold text-white uppercase">Acceso Restringido</h2>
+          <p className="text-sm text-gray-400">
+            Esta sección contiene configuraciones, aprobaciones e inscripciones para Super Admins, Distribuidores Autorizados, Organizadores Certificados y Retailers.
+          </p>
+          <div className="p-3 bg-beyblade-dark text-[11px] text-beyblade-electricCyan rounded-xl border border-beyblade-electricCyan/25">
+            Los permisos y accesos del sistema dependen exclusivamente de tu rol configurado en Supabase Auth (`beyblade.profiles.role`).
+          </div>
+        </div>
+      )}
+
+      {/* Simulated Email Notification Toast Container */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+        {emailToasts.map((toast) => (
+          <div
+            key={toast.id}
+            className="bg-beyblade-darker/95 border-2 border-beyblade-electricCyan shadow-[0_0_15px_rgba(0,240,255,0.3)] p-4 rounded-2xl pointer-events-auto animate-slide-in space-y-2"
+          >
+            <div className="flex items-center justify-between border-b border-white/5 pb-1">
+              <span className="text-[10px] font-black uppercase text-beyblade-electricCyan tracking-wider">📧 Correo Simulado</span>
+              <button 
+                onClick={() => setEmailToasts(prev => prev.filter(t => t.id !== toast.id))}
+                className="text-[9px] text-gray-500 hover:text-white uppercase font-bold"
+              >
+                Cerrar
+              </button>
+            </div>
+            <div className="text-[11px] space-y-1">
+              <p className="text-gray-400">
+                Para: <strong className="text-white">{toast.to}</strong>
+              </p>
+              <p className="text-white font-bold">
+                Asunto: {toast.subject}
+              </p>
+              <p className="text-gray-400 leading-relaxed pt-1">
+                {toast.message}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+    </div>
+  );
+};
