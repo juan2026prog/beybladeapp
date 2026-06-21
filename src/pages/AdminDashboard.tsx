@@ -87,7 +87,7 @@ export const AdminDashboard: React.FC = () => {
   const [storeStocks, setStoreStocks] = useState<(StoreStock & { productName: string })[]>([]);
 
   // Organizer states
-  const [organizerTab, setOrganizerTab] = useState<'tournaments' | 'journeys'>('tournaments');
+  const [organizerTab, setOrganizerTab] = useState<'tournaments' | 'journeys' | 'seasons'>('tournaments');
   const [isCreatingTournament, setIsCreatingTournament] = useState(false);
   const [newTourName, setNewTourName] = useState('');
   const [newTourLeague, setNewTourLeague] = useState<'Junior' | 'Open' | 'Ambas'>('Open');
@@ -3231,6 +3231,15 @@ export const AdminDashboard: React.FC = () => {
               </button>
               <button
                 type="button"
+                onClick={() => setOrganizerTab('seasons')}
+                className={`text-lg font-black uppercase tracking-wide transition-all ${
+                  organizerTab === 'seasons' ? 'text-white border-b-2 border-beyblade-electricCyan pb-1' : 'text-gray-500 hover:text-white'
+                }`}
+              >
+                Temporadas y Ligas
+              </button>
+              <button
+                type="button"
                 onClick={() => setOrganizerTab('journeys')}
                 className={`text-lg font-black uppercase tracking-wide transition-all ${
                   organizerTab === 'journeys' ? 'text-white border-b-2 border-beyblade-electricCyan pb-1' : 'text-gray-500 hover:text-white'
@@ -3247,14 +3256,14 @@ export const AdminDashboard: React.FC = () => {
               >
                 <Plus className="h-4 w-4" /> {isCreatingTournament ? 'Cancelar' : 'Crear Torneo'}
               </button>
-            ) : (
+            ) : organizerTab === 'journeys' ? (
               <button
                 onClick={() => setIsCreatingJourney(!isCreatingJourney)}
                 className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white font-bold text-xs uppercase rounded-lg flex items-center gap-1 transition-all"
               >
                 <Plus className="h-4 w-4" /> {isCreatingJourney ? 'Cancelar' : 'Crear Jornada'}
               </button>
-            )}
+            ) : null}
           </div>
 
           {/* Creation Form */}
@@ -4133,6 +4142,188 @@ export const AdminDashboard: React.FC = () => {
                 {journeys.filter(j => j.created_by === currentUser.id).length === 0 && (
                   <p className="text-xs text-gray-500 italic py-6 col-span-full text-center">No has creado jornadas aún.</p>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Tab: Seasons & Leagues for Organizers */}
+          {organizerTab === 'seasons' && (
+            <div className="space-y-6 animate-fade-in text-left">
+              <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                <h2 className="text-lg font-black text-white uppercase tracking-wide flex items-center gap-2">
+                  <Calendar className="h-5.5 w-5.5 text-beyblade-electricCyan" /> Gestión de Temporadas y Ligas
+                </h2>
+                <span className="bg-white/5 border border-white/10 px-3 py-1 rounded-xl text-xs font-bold text-gray-400">
+                  {seasons.filter(s => s.country_id === currentUser.country_id).length} Temporadas registradas
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Left: Create Season Form */}
+                <div className="bg-beyblade-card border border-white/5 p-6 rounded-3xl space-y-4">
+                  <h3 className="font-extrabold text-sm text-white uppercase tracking-wider font-title">Nueva Temporada</h3>
+                  <div className="space-y-3 text-xs">
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-gray-500 font-bold uppercase">Nombre de Temporada</label>
+                      <input
+                        type="text"
+                        value={newSeasonName}
+                        onChange={(e) => setNewSeasonName(e.target.value)}
+                        placeholder="Ej: Temporada Open Uruguay 2026"
+                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-gray-500 font-bold uppercase">Liga / Categoría</label>
+                      <select
+                        value={newSeasonLeague}
+                        onChange={(e) => setNewSeasonLeague(e.target.value as any)}
+                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white"
+                      >
+                        <option value="junior">Liga Junior</option>
+                        <option value="open">Liga Open</option>
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">Inicio</label>
+                        <input
+                          type="date"
+                          value={newSeasonStartDate}
+                          onChange={(e) => setNewSeasonStartDate(e.target.value)}
+                          className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">Fin</label>
+                        <input
+                          type="date"
+                          value={newSeasonEndDate}
+                          onChange={(e) => setNewSeasonEndDate(e.target.value)}
+                          className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-gray-500 font-bold uppercase">Descripción</label>
+                      <textarea
+                        value={newSeasonDesc}
+                        onChange={(e) => setNewSeasonDesc(e.target.value)}
+                        placeholder="Detalles de clasificación local, regional y nacional..."
+                        rows={3}
+                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          if (!newSeasonName || !newSeasonStartDate || !newSeasonEndDate) {
+                            throw new Error('Por favor completa todos los campos.');
+                          }
+                          await DbService.createSeason({
+                            name: newSeasonName,
+                            country_id: currentUser.country_id || 'UY',
+                            league_type: newSeasonLeague,
+                            start_date: newSeasonStartDate,
+                            end_date: newSeasonEndDate,
+                            description: newSeasonDesc,
+                            status: 'draft'
+                          });
+                          setFeedback('¡Temporada creada como Borrador con éxito!');
+                          setNewSeasonName('');
+                          setNewSeasonStartDate('');
+                          setNewSeasonEndDate('');
+                          setNewSeasonDesc('');
+                          loadData();
+                          setTimeout(() => setFeedback(''), 3000);
+                        } catch (err: any) {
+                          setErrorMsg(err.message || 'Error al crear temporada.');
+                          setTimeout(() => setErrorMsg(''), 4000);
+                        }
+                      }}
+                      className="w-full py-2.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports text-[9px] uppercase tracking-widest rounded-xl transition-all"
+                    >
+                      Crear Temporada
+                    </button>
+                  </div>
+                </div>
+
+                {/* Right: Seasons List */}
+                <div className="lg:col-span-2 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {seasons.filter(s => s.country_id === currentUser.country_id).map((season) => (
+                      <div key={season.id} className="bg-beyblade-card border border-white/5 rounded-2xl p-5 space-y-3">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="font-extrabold text-white text-sm uppercase">{season.name}</h4>
+                            <p className="text-[10px] text-gray-500 font-bold mt-0.5">
+                              Rango: {new Date(season.start_date).toLocaleDateString()} al {new Date(season.end_date).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[8px] font-black font-esports uppercase tracking-widest ${
+                            season.status === 'active' 
+                              ? 'bg-beyblade-electricCyan/10 text-beyblade-electricCyan border border-beyblade-electricCyan/20' 
+                              : season.status === 'completed'
+                                ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/20'
+                                : 'bg-gray-400/10 text-gray-400 border border-gray-400/20'
+                          }`}>
+                            {season.status === 'active' ? 'Activo' : season.status === 'completed' ? 'Finalizado' : 'Borrador'}
+                          </span>
+                        </div>
+                        <div className="text-[9px] text-gray-400 font-bold font-esports tracking-wider">
+                          LIGA {season.league_type.toUpperCase()}
+                        </div>
+                        {season.description && (
+                          <p className="text-xs text-gray-400 border-t border-white/5 pt-2 leading-relaxed">
+                            {season.description}
+                          </p>
+                        )}
+                        <div className="flex gap-2 pt-1 border-t border-white/5">
+                          {season.status === 'draft' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await DbService.updateSeasonStatus(season.id!, 'active');
+                                loadData();
+                              }}
+                              className="px-3 py-1.5 bg-beyblade-electricCyan/10 hover:bg-beyblade-electricCyan text-beyblade-electricCyan hover:text-beyblade-darker border border-beyblade-electricCyan/20 hover:border-transparent font-extrabold text-[9px] uppercase tracking-wider rounded-lg transition-all"
+                            >
+                              Activar
+                            </button>
+                          )}
+                          {season.status === 'active' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await DbService.updateSeasonStatus(season.id!, 'completed');
+                                loadData();
+                              }}
+                              className="px-3 py-1.5 bg-emerald-400/10 hover:bg-emerald-400 text-emerald-400 hover:text-beyblade-darker border border-emerald-400/20 hover:border-transparent font-extrabold text-[9px] uppercase tracking-wider rounded-lg transition-all"
+                            >
+                              Finalizar
+                            </button>
+                          )}
+                          {season.status === 'completed' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await DbService.updateSeasonStatus(season.id!, 'draft');
+                                loadData();
+                              }}
+                              className="px-3 py-1.5 bg-gray-400/10 hover:bg-gray-400 text-gray-400 hover:text-beyblade-darker border border-gray-400/20 hover:border-transparent font-extrabold text-[9px] uppercase tracking-wider rounded-lg transition-all"
+                            >
+                              Volver a Borrador
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {seasons.filter(s => s.country_id === currentUser.country_id).length === 0 && (
+                      <p className="text-xs text-gray-500 italic py-6 col-span-full text-center">No hay temporadas o ligas registradas en tu país.</p>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}
