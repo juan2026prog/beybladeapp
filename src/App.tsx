@@ -11,6 +11,7 @@ const Tournaments = lazy(() => import('./pages/Tournaments').then(m => ({ defaul
 const Rankings = lazy(() => import('./pages/Rankings').then(m => ({ default: m.Rankings })));
 const StoreFinder = lazy(() => import('./pages/StoreFinder').then(m => ({ default: m.StoreFinder })));
 const Products = lazy(() => import('./pages/Products').then(m => ({ default: m.Products })));
+const ProductDetail = lazy(() => import('./pages/ProductDetail').then(m => ({ default: m.ProductDetail })));
 const Academy = lazy(() => import('./pages/Academy').then(m => ({ default: m.Academy })));
 const NewsFeed = lazy(() => import('./pages/NewsFeed').then(m => ({ default: m.NewsFeed })));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
@@ -41,6 +42,7 @@ const App: React.FC = () => {
             <Route path="/rankings" element={<Rankings />} />
             <Route path="/stores" element={<StoreFinder />} />
             <Route path="/products" element={<Products />} />
+            <Route path="/products/:id" element={<ProductDetail />} />
             <Route path="/academy" element={<Academy />} />
             <Route path="/news" element={<NewsFeed />} />
             <Route path="/map" element={<MapPage />} />

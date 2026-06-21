@@ -77,6 +77,28 @@ export interface Product {
   type: 'starter' | 'booster' | 'stadium' | 'launcher' | 'accesorio';
   release_date: string;
   status: 'disponible' | 'proximo lanzamiento' | 'agotado';
+  sku?: string;
+  main_image_url?: string;
+  short_description?: string;
+  long_description?: string;
+  product_category?: 'Ataque' | 'Defensa' | 'Resistencia' | 'Equilibrio' | string;
+  product_type?: 'starter' | 'booster' | 'stadium' | 'launcher' | 'set' | string;
+  blade_name?: string;
+  ratchet_name?: string;
+  bit_name?: string;
+}
+
+export interface ProductMedia {
+  id?: string;
+  product_id: string;
+  media_type: 'image' | 'back_card' | 'video' | 'youtube' | 'pdf';
+  title?: string;
+  url: string;
+  thumbnail_url?: string;
+  sort_order?: number;
+  is_primary?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface HeroBanner {
@@ -449,7 +471,7 @@ export class DbService {
   // PRODUCTS
   // -------------------------------------------------------------
   public static async getProductsList(): Promise<Product[]> {
-    const { data, error } = await supabase.from('products').select('id, name, line, image_url, description, type, release_date, status');
+    const { data, error } = await supabase.from('products').select('*');
     if (error) throw error;
     return data || [];
   }
@@ -458,6 +480,48 @@ export class DbService {
     const { data, error } = await supabase.from('products').select('*').eq('id', id).maybeSingle();
     if (error) throw error;
     return data || undefined;
+  }
+
+  // --- PRODUCT MULTIMEDIA CRUD ---
+  public static async getProductMedia(productId: string): Promise<ProductMedia[]> {
+    const { data, error } = await supabase
+      .from('product_media')
+      .select('*')
+      .eq('product_id', productId)
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  }
+
+  public static async saveProductMedia(media: Omit<ProductMedia, 'created_at' | 'updated_at'>): Promise<void> {
+    if (media.id) {
+      const { error } = await supabase
+        .from('product_media')
+        .update(media)
+        .eq('id', media.id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('product_media')
+        .insert(media);
+      if (error) throw error;
+    }
+  }
+
+  public static async deleteProductMedia(mediaId: string): Promise<void> {
+    const { error } = await supabase
+      .from('product_media')
+      .delete()
+      .eq('id', mediaId);
+    if (error) throw error;
+  }
+
+  public static async updateProductDetails(product: Partial<Product> & { id: string }): Promise<void> {
+    const { error } = await supabase
+      .from('products')
+      .update(product)
+      .eq('id', product.id);
+    if (error) throw error;
   }
 
   // -------------------------------------------------------------

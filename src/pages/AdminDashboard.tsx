@@ -3,7 +3,7 @@ import {
   Shield, Check, X, ToggleLeft, ToggleRight, Plus, 
   Trophy, Settings, CheckSquare, Camera,
   TrendingUp, BarChart2, Flag, Package, Map, Users,
-  ShoppingBag, MapPin, AlertCircle
+  ShoppingBag, MapPin, AlertCircle, Film
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabaseClient';
@@ -13,7 +13,7 @@ import { QRScanner } from '../components/QRScanner';
 import { RealQRScanner } from '../components/RealQRScanner';
 import type { 
   ModuleConfig, Player, Tournament, 
-  Organizer, Judge, Store as StoreType, StoreStock, Registration, Product, Journey
+  Organizer, Judge, Store as StoreType, StoreStock, Registration, Product, Journey, ProductMedia
 } from '../services/dbService';
 import { LocationAutocomplete } from '../components/LocationAutocomplete';
 import type { NormalizedLocation } from '../services/geocodingService';
@@ -24,7 +24,7 @@ export const AdminDashboard: React.FC = () => {
   const [activeLocalities, setActiveLocalities] = useState<{ id: number; department: string; name: string; active: boolean }[]>([]);
 
   // Tab states
-  const [activeSuperTab, setActiveSuperTab] = useState<'analytics' | 'modules' | 'retail' | 'settings'>('analytics');
+  const [activeSuperTab, setActiveSuperTab] = useState<'analytics' | 'modules' | 'retail' | 'settings' | 'products'>('analytics');
   const [activeDistributorTab, setActiveDistributorTab] = useState<'certifications' | 'stats' | 'retail'>('certifications');
 
   // Hero Banners and Settings states
@@ -32,6 +32,25 @@ export const AdminDashboard: React.FC = () => {
   const [settings, setSettings] = useState<{ [key: string]: string }>({ brand_title: '', brand_subtitle: '', brand_logo: '' });
   const [editingBanner, setEditingBanner] = useState<any | null>(null);
   const [isCreatingBanner, setIsCreatingBanner] = useState(false);
+
+  // Products Management states
+  const [selectedAdminProduct, setSelectedAdminProduct] = useState<Product | null>(null);
+  const [productMediaList, setProductMediaList] = useState<ProductMedia[]>([]);
+  const [isAddingMedia, setIsAddingMedia] = useState(false);
+  const [newMediaItem, setNewMediaItem] = useState<{
+    media_type: 'image' | 'back_card' | 'video' | 'youtube' | 'pdf';
+    title: string;
+    url: string;
+    sort_order: number;
+    is_primary: boolean;
+  }>({
+    media_type: 'image',
+    title: '',
+    url: '',
+    sort_order: 0,
+    is_primary: false
+  });
+  const [adminProductSearch, setAdminProductSearch] = useState('');
   
   // Interactive Map states
   const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
@@ -375,6 +394,25 @@ export const AdminDashboard: React.FC = () => {
     setModules(updated);
     setFeedback('Módulo configurado exitosamente.');
     setTimeout(() => setFeedback(''), 3000);
+  };
+
+  const handleSelectAdminProduct = async (prod: Product) => {
+    setSelectedAdminProduct(prod);
+    try {
+      const media = await DbService.getProductMedia(prod.id);
+      setProductMediaList(media);
+      setIsAddingMedia(false);
+      setNewMediaItem({
+        media_type: 'image',
+        title: '',
+        url: '',
+        sort_order: (media.length > 0 ? Math.max(...media.map(m => m.sort_order || 0)) + 1 : 0),
+        is_primary: false
+      });
+    } catch (err: any) {
+      setErrorMsg('Error al cargar multimedia del producto.');
+      setTimeout(() => setErrorMsg(''), 3000);
+    }
   };
 
   // -------------------------------------------------------------
@@ -883,6 +921,18 @@ export const AdminDashboard: React.FC = () => {
             >
               <span className="flex items-center gap-2">
                 <Settings className="h-4 w-4" /> Personalización & Banners
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveSuperTab('products')}
+              className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                activeSuperTab === 'products'
+                  ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <ShoppingBag className="h-4 w-4" /> Productos
               </span>
             </button>
           </div>
@@ -1830,6 +1880,603 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 5: Products & Multimedia Administration */}
+          {activeSuperTab === 'products' && (
+            <div className="space-y-6 animate-fade-in text-left">
+              <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                <h2 className="text-lg font-black text-white uppercase tracking-wide flex items-center gap-2">
+                  <ShoppingBag className="h-5.5 w-5.5 text-beyblade-electricCyan text-glow-cyan" /> Administración de Productos & Catálogo
+                </h2>
+                <span className="bg-white/5 border border-white/10 px-3 py-1 rounded-xl text-xs font-bold text-gray-400 font-mono">
+                  Total: {products.length} Items
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                
+                {/* Left: Product List Selection */}
+                <div className="lg:col-span-4 space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-gray-500 font-bold uppercase font-esports">Buscar en Inventario</label>
+                    <input
+                      type="text"
+                      value={adminProductSearch}
+                      onChange={(e) => setAdminProductSearch(e.target.value)}
+                      placeholder="Nombre o SKU..."
+                      className="w-full bg-beyblade-card border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-beyblade-electricCyan focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1 no-scrollbar">
+                    {products
+                      .filter(p => {
+                        const q = adminProductSearch.toLowerCase();
+                        return p.name.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q);
+                      })
+                      .map((prod) => {
+                        const isSelected = selectedAdminProduct?.id === prod.id;
+                        return (
+                          <button
+                            key={prod.id}
+                            onClick={() => handleSelectAdminProduct(prod)}
+                            className={`w-full text-left p-4 rounded-2xl border transition-all flex justify-between items-center ${
+                              isSelected 
+                                ? 'bg-beyblade-electricCyan/10 border-beyblade-electricCyan shadow-[0_0_12px_rgba(0,240,255,0.05)]' 
+                                : 'bg-beyblade-card border-white/5 hover:border-white/15'
+                            }`}
+                          >
+                            <div className="space-y-1 truncate">
+                              <h4 className="font-extrabold text-white text-xs uppercase tracking-wide truncate">{prod.name}</h4>
+                              <p className="text-[9px] font-mono text-gray-400">ID: {prod.id}</p>
+                              {prod.sku ? (
+                                <span className="inline-block text-[8px] bg-black/40 text-beyblade-electricCyan font-mono font-bold px-1.5 py-0.5 rounded border border-beyblade-electricCyan/20">
+                                  SKU: {prod.sku}
+                                </span>
+                              ) : (
+                                <span className="inline-block text-[8px] bg-black/20 text-gray-500 font-mono px-1.5 py-0.5 rounded italic">
+                                  Sin SKU
+                                </span>
+                              )}
+                            </div>
+                            <span className={`text-[8px] font-black uppercase font-esports px-2 py-0.5 rounded tracking-wider border ${
+                              prod.status === 'disponible' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                              prod.status === 'proximo lanzamiento' ? 'bg-beyblade-electricCyan/10 text-beyblade-electricCyan border-beyblade-electricCyan/20' :
+                              'bg-beyblade-electricRed/10 text-beyblade-electricRed border-beyblade-electricRed/20'
+                            }`}>
+                              {prod.status}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {/* Right: Product Editor Form & Multimedia */}
+                <div className="lg:col-span-8">
+                  {selectedAdminProduct ? (
+                    <div className="space-y-6">
+                      
+                      {/* Editor section */}
+                      <div className="bg-beyblade-card border border-white/5 p-6 rounded-3xl space-y-4">
+                        <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                          <h3 className="font-title text-sm text-white uppercase tracking-wider flex items-center gap-2">
+                            <Settings className="h-4.5 w-4.5 text-beyblade-electricCyan" /> Ficha Técnica del Producto
+                          </h3>
+                          <span className="text-[9px] font-mono text-gray-500">ID: {selectedAdminProduct.id}</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
+                          {/* SKU */}
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-gray-500 font-bold uppercase">SKU (Unico)</label>
+                            <input
+                              type="text"
+                              value={selectedAdminProduct.sku || ''}
+                              onChange={(e) => setSelectedAdminProduct({ ...selectedAdminProduct, sku: e.target.value })}
+                              placeholder="BX-01"
+                              className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                            />
+                          </div>
+
+                          {/* Nombre */}
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-gray-500 font-bold uppercase">Nombre del Beyblade</label>
+                            <input
+                              type="text"
+                              value={selectedAdminProduct.name}
+                              onChange={(e) => setSelectedAdminProduct({ ...selectedAdminProduct, name: e.target.value })}
+                              className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                            />
+                          </div>
+
+                          {/* Linea */}
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-gray-500 font-bold uppercase">Línea de Producto</label>
+                            <input
+                              type="text"
+                              value={selectedAdminProduct.line || ''}
+                              onChange={(e) => setSelectedAdminProduct({ ...selectedAdminProduct, line: e.target.value })}
+                              className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                            />
+                          </div>
+
+                          {/* Tipo */}
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-gray-500 font-bold uppercase">Tipo de Catálogo</label>
+                            <select
+                              value={selectedAdminProduct.product_type || selectedAdminProduct.type || 'booster'}
+                              onChange={(e) => setSelectedAdminProduct({ 
+                                ...selectedAdminProduct, 
+                                product_type: e.target.value,
+                                type: e.target.value as any
+                              })}
+                              className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white cursor-pointer"
+                            >
+                              <option value="starter">Starter</option>
+                              <option value="booster">Booster</option>
+                              <option value="stadium">Stadium</option>
+                              <option value="launcher">Launcher</option>
+                              <option value="set">Set Completo</option>
+                              <option value="accesorio">Accesorio</option>
+                            </select>
+                          </div>
+
+                          {/* Categoria Combate */}
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-gray-500 font-bold uppercase">Categoría de Combate</label>
+                            <select
+                              value={selectedAdminProduct.product_category || 'Equilibrio'}
+                              onChange={(e) => setSelectedAdminProduct({ ...selectedAdminProduct, product_category: e.target.value })}
+                              className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white cursor-pointer"
+                            >
+                              <option value="Ataque">Ataque</option>
+                              <option value="Defensa">Defensa</option>
+                              <option value="Resistencia">Resistencia</option>
+                              <option value="Equilibrio">Equilibrio / Balance</option>
+                              <option value="Ninguno">Ninguno (Estadio / Accesorio)</option>
+                            </select>
+                          </div>
+
+                          {/* Estado */}
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-gray-500 font-bold uppercase">Estado de Stock</label>
+                            <select
+                              value={selectedAdminProduct.status}
+                              onChange={(e) => setSelectedAdminProduct({ ...selectedAdminProduct, status: e.target.value as any })}
+                              className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white cursor-pointer"
+                            >
+                              <option value="disponible">Disponible</option>
+                              <option value="proximo lanzamiento">Próximo lanzamiento</option>
+                              <option value="agotado">Agotado</option>
+                            </select>
+                          </div>
+
+                          {/* Blade Name */}
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-gray-500 font-bold uppercase">Blade Name</label>
+                            <input
+                              type="text"
+                              value={selectedAdminProduct.blade_name || ''}
+                              onChange={(e) => setSelectedAdminProduct({ ...selectedAdminProduct, blade_name: e.target.value })}
+                              placeholder="Sword Dran"
+                              className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                            />
+                          </div>
+
+                          {/* Ratchet Name */}
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-gray-500 font-bold uppercase">Ratchet Name</label>
+                            <input
+                              type="text"
+                              value={selectedAdminProduct.ratchet_name || ''}
+                              onChange={(e) => setSelectedAdminProduct({ ...selectedAdminProduct, ratchet_name: e.target.value })}
+                              placeholder="3-60"
+                              className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                            />
+                          </div>
+
+                          {/* Bit Name */}
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-gray-500 font-bold uppercase">Bit Name</label>
+                            <input
+                              type="text"
+                              value={selectedAdminProduct.bit_name || ''}
+                              onChange={(e) => setSelectedAdminProduct({ ...selectedAdminProduct, bit_name: e.target.value })}
+                              placeholder="Flat"
+                              className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Descriptions */}
+                        <div className="space-y-3 text-left">
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-gray-500 font-bold uppercase">Descripción Corta (Catálogo)</label>
+                            <input
+                              type="text"
+                              value={selectedAdminProduct.short_description || selectedAdminProduct.description}
+                              onChange={(e) => setSelectedAdminProduct({ 
+                                ...selectedAdminProduct, 
+                                short_description: e.target.value,
+                                description: e.target.value 
+                              })}
+                              className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-gray-500 font-bold uppercase">Descripción Larga (Detalles)</label>
+                            <textarea
+                              value={selectedAdminProduct.long_description || ''}
+                              onChange={(e) => setSelectedAdminProduct({ ...selectedAdminProduct, long_description: e.target.value })}
+                              rows={3}
+                              className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-sans"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Save Product button */}
+                        <div className="flex justify-end pt-2">
+                          <button
+                            onClick={async () => {
+                              try {
+                                if (!selectedAdminProduct.sku) {
+                                  throw new Error('El SKU es obligatorio.');
+                                }
+                                await DbService.updateProductDetails(selectedAdminProduct);
+                                setFeedback('¡Producto guardado exitosamente!');
+                                setTimeout(() => setFeedback(''), 3000);
+                                loadData();
+                              } catch (err: any) {
+                                setErrorMsg(err.message || 'Error al guardar detalles de producto.');
+                                setTimeout(() => setErrorMsg(''), 4000);
+                              }
+                            }}
+                            className="px-6 py-2.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports text-[10px] uppercase tracking-widest rounded-xl transition-all"
+                          >
+                            Guardar Especificaciones
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* MULTIMEDIA MANAGEMENT SECTION */}
+                      <div className="bg-beyblade-card border border-white/5 p-6 rounded-3xl space-y-6">
+                        <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                          <h3 className="font-title text-sm text-white uppercase tracking-wider flex items-center gap-2">
+                            <Trophy className="h-4.5 w-4.5 text-beyblade-electricRed" /> Galería & Material Multimedia
+                          </h3>
+                          {!isAddingMedia && (
+                            <button
+                              onClick={() => {
+                                setIsAddingMedia(true);
+                              }}
+                              className="px-3.5 py-1.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports text-[8px] uppercase tracking-widest rounded-lg transition-all flex items-center gap-1"
+                            >
+                              <Plus className="h-3 w-3" /> Agregar Media
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Add Media Subform */}
+                        {isAddingMedia && (
+                          <div className="bg-beyblade-darker/60 p-5 rounded-2xl border border-beyblade-electricCyan/20 space-y-4 animate-fade-in text-left">
+                            <h4 className="text-[10px] font-black text-beyblade-electricCyan uppercase tracking-widest font-esports">
+                              ➕ Vincular Nuevo Elemento Multimedia
+                            </h4>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                              {/* Media Type */}
+                              <div className="space-y-1">
+                                <label className="text-[9px] text-gray-500 font-bold uppercase">Tipo de Elemento</label>
+                                <select
+                                  value={newMediaItem.media_type}
+                                  onChange={(e) => setNewMediaItem({ 
+                                    ...newMediaItem, 
+                                    media_type: e.target.value as any,
+                                    url: '' // Reset url
+                                  })}
+                                  className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white cursor-pointer"
+                                >
+                                  <option value="image">Imagen de Galería</option>
+                                  <option value="back_card">Back Card Oficial</option>
+                                  <option value="video">Video MP4 (Archivo/URL)</option>
+                                  <option value="youtube">Enlace de YouTube</option>
+                                  <option value="pdf">Documento PDF</option>
+                                </select>
+                              </div>
+
+                              {/* Title */}
+                              <div className="space-y-1">
+                                <label className="text-[9px] text-gray-500 font-bold uppercase">Título Descriptivo</label>
+                                <input
+                                  type="text"
+                                  value={newMediaItem.title}
+                                  onChange={(e) => setNewMediaItem({ ...newMediaItem, title: e.target.value })}
+                                  placeholder="Ej: Vista de Caja, Test de Giro..."
+                                  className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                                />
+                              </div>
+
+                              {/* Sort Order */}
+                              <div className="space-y-1">
+                                <label className="text-[9px] text-gray-500 font-bold uppercase">Orden (Sort Order)</label>
+                                <input
+                                  type="number"
+                                  value={newMediaItem.sort_order}
+                                  onChange={(e) => setNewMediaItem({ ...newMediaItem, sort_order: parseInt(e.target.value) || 0 })}
+                                  className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                                />
+                              </div>
+                            </div>
+
+                            {/* URL and File Input combined */}
+                            <div className="space-y-1">
+                              <label className="text-[9px] text-gray-500 font-bold uppercase">Contenido (URL o Archivo local)</label>
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="text"
+                                  value={newMediaItem.url}
+                                  onChange={(e) => setNewMediaItem({ ...newMediaItem, url: e.target.value })}
+                                  placeholder={
+                                    newMediaItem.media_type === 'youtube' 
+                                      ? "https://www.youtube.com/watch?v=..." 
+                                      : "https://... o selecciona un archivo local"
+                                  }
+                                  className="flex-grow bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
+                                />
+                                {newMediaItem.media_type !== 'youtube' && (
+                                  <label className="cursor-pointer bg-white/5 border border-white/10 hover:bg-white/10 text-white text-[9px] font-black font-esports uppercase tracking-widest px-3 py-2.5 rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap">
+                                    <Camera className="h-3 w-3" /> Subir Archivo
+                                    <input
+                                      type="file"
+                                      accept={
+                                        newMediaItem.media_type === 'video' ? 'video/*' : 
+                                        newMediaItem.media_type === 'pdf' ? 'application/pdf' : 
+                                        'image/*'
+                                      }
+                                      className="hidden"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                          const reader = new FileReader();
+                                          reader.onloadend = () => {
+                                            const base64String = reader.result as string;
+                                            setNewMediaItem({ ...newMediaItem, url: base64String });
+                                          };
+                                          reader.readAsDataURL(file);
+                                        }
+                                      }}
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Primary image checkbox */}
+                            {(newMediaItem.media_type === 'image') && (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  id="new_media_primary_chk"
+                                  checked={newMediaItem.is_primary}
+                                  onChange={(e) => setNewMediaItem({ ...newMediaItem, is_primary: e.target.checked })}
+                                  className="rounded bg-beyblade-dark border border-white/10 text-beyblade-electricCyan focus:ring-0 cursor-pointer"
+                                />
+                                <label htmlFor="new_media_primary_chk" className="text-xs text-white font-bold cursor-pointer select-none">
+                                  Establecer como imagen principal del producto
+                                </label>
+                              </div>
+                            )}
+
+                            {/* Preview */}
+                            {newMediaItem.url && (
+                              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5 max-w-sm flex items-center gap-3">
+                                {newMediaItem.media_type === 'image' || newMediaItem.media_type === 'back_card' ? (
+                                  <img src={newMediaItem.url} className="h-12 w-12 object-contain bg-black rounded p-0.5 border border-white/10" alt="Preview" />
+                                ) : (
+                                  <div className="p-2.5 bg-black/40 rounded text-beyblade-electricCyan">
+                                    <Film className="h-5 w-5" />
+                                  </div>
+                                )}
+                                <div className="truncate text-left font-sans">
+                                  <p className="text-[9px] text-emerald-400 font-bold uppercase">Vista previa cargada</p>
+                                  <p className="text-[8px] text-gray-500 truncate max-w-[200px]">{newMediaItem.url.substring(0, 60)}...</p>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Subform actions */}
+                            <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                              <button
+                                onClick={() => setIsAddingMedia(false)}
+                                className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/5 text-gray-400 font-black font-esports text-[8px] uppercase tracking-widest rounded-lg transition-all"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    if (!newMediaItem.url) {
+                                      throw new Error('Debes subir un archivo o definir una dirección URL.');
+                                    }
+                                    
+                                    // Save media
+                                    await DbService.saveProductMedia({
+                                      product_id: selectedAdminProduct.id,
+                                      media_type: newMediaItem.media_type,
+                                      title: newMediaItem.title || 'Multimedia',
+                                      url: newMediaItem.url,
+                                      sort_order: newMediaItem.sort_order,
+                                      is_primary: newMediaItem.is_primary
+                                    });
+
+                                    // If set as primary, update the product's main image URL
+                                    if (newMediaItem.is_primary && newMediaItem.media_type === 'image') {
+                                      await DbService.updateProductDetails({
+                                        id: selectedAdminProduct.id,
+                                        main_image_url: newMediaItem.url
+                                      });
+                                    }
+
+                                    setFeedback('¡Multimedia vinculada correctamente!');
+                                    setTimeout(() => setFeedback(''), 3000);
+                                    
+                                    // Reload media list
+                                    const media = await DbService.getProductMedia(selectedAdminProduct.id);
+                                    setProductMediaList(media);
+                                    setIsAddingMedia(false);
+                                  } catch (err: any) {
+                                    setErrorMsg(err.message || 'Error al guardar multimedia.');
+                                    setTimeout(() => setErrorMsg(''), 4000);
+                                  }
+                                }}
+                                className="px-4 py-2 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports text-[8px] uppercase tracking-widest rounded-lg transition-all"
+                              >
+                                Guardar Item
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Media Items List Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {/* Fallback Main Image slot in list if not empty */}
+                          {selectedAdminProduct.main_image_url && (
+                            <div className="bg-beyblade-darker/40 p-4 rounded-2xl border border-beyblade-electricCyan/25 flex items-center justify-between gap-3 relative">
+                              <span className="absolute top-2.5 right-3 bg-beyblade-electricCyan/10 text-beyblade-electricCyan text-[6px] font-black font-esports border border-beyblade-electricCyan/20 px-1.5 py-0.5 rounded tracking-wider uppercase">Principal</span>
+                              <div className="flex items-center gap-3">
+                                <img src={selectedAdminProduct.main_image_url} className="h-10 w-10 object-contain bg-black rounded p-0.5" alt="Imagen Principal" />
+                                <div className="truncate text-left">
+                                  <h4 className="text-[10px] font-black text-white uppercase tracking-wider truncate font-esports">Imagen Principal</h4>
+                                  <p className="text-[8px] text-gray-500 font-sans">Configurada en la Ficha</p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  if (!window.confirm('¿Seguro que deseas remover la imagen principal de la ficha?')) return;
+                                  try {
+                                    await DbService.updateProductDetails({
+                                      id: selectedAdminProduct.id,
+                                      main_image_url: ''
+                                    });
+                                    setSelectedAdminProduct({ ...selectedAdminProduct, main_image_url: '' });
+                                    setFeedback('Imagen principal removida.');
+                                    setTimeout(() => setFeedback(''), 3000);
+                                  } catch (err: any) {
+                                    setErrorMsg('Error al remover imagen principal.');
+                                  }
+                                }}
+                                className="text-[8px] font-bold text-beyblade-electricRed hover:underline uppercase tracking-wider font-esports pr-1"
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Loop through actual product media */}
+                          {productMediaList.map((media) => (
+                            <div key={media.id} className="bg-beyblade-darker/40 p-4 rounded-2xl border border-white/5 flex items-center justify-between gap-3 relative hover:border-white/10 transition-colors">
+                              <span className="absolute top-2.5 right-3 bg-white/5 text-[6px] font-black font-esports border border-white/10 px-1.5 py-0.5 rounded tracking-wider uppercase">{media.media_type}</span>
+                              <div className="flex items-center gap-3 truncate">
+                                {media.media_type === 'image' || media.media_type === 'back_card' ? (
+                                  <img src={media.url} className="h-10 w-10 object-contain bg-black rounded p-0.5 border border-white/5" alt="Thumbnail" />
+                                ) : (
+                                  <div className="p-2.5 bg-black rounded text-beyblade-electricCyan">
+                                    <Film className="h-4 w-4" />
+                                  </div>
+                                )}
+                                <div className="truncate text-left font-sans">
+                                  <h4 className="text-[10px] font-black text-white uppercase tracking-wider truncate font-esports">{media.title || 'Elemento'}</h4>
+                                  <p className="text-[8px] text-gray-500">Orden: {media.sort_order || 0}</p>
+                                </div>
+                              </div>
+                              <div className="flex flex-col gap-1 items-end pr-1 font-esports">
+                                <button
+                                  onClick={async () => {
+                                    if (!window.confirm('¿Seguro que deseas eliminar este elemento de la galería?')) return;
+                                    try {
+                                      if (media.id) {
+                                        await DbService.deleteProductMedia(media.id);
+                                        
+                                        // Reload list
+                                        const list = await DbService.getProductMedia(selectedAdminProduct.id);
+                                        setProductMediaList(list);
+                                        setFeedback('Multimedia eliminada.');
+                                        setTimeout(() => setFeedback(''), 3000);
+                                      }
+                                    } catch (err: any) {
+                                      setErrorMsg('Error al eliminar multimedia.');
+                                    }
+                                  }}
+                                  className="text-[8px] font-bold text-beyblade-electricRed hover:underline uppercase tracking-wider"
+                                >
+                                  Eliminar
+                                </button>
+                                {media.media_type === 'image' && !media.is_primary && (
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        if (media.id) {
+                                          // Update all media items to set is_primary to false
+                                          for (const item of productMediaList) {
+                                            if (item.id) {
+                                              await DbService.saveProductMedia({
+                                                ...item,
+                                                is_primary: item.id === media.id
+                                              });
+                                            }
+                                          }
+                                          // Update product main_image_url
+                                          await DbService.updateProductDetails({
+                                            id: selectedAdminProduct.id,
+                                            main_image_url: media.url
+                                          });
+
+                                          setFeedback('¡Imagen establecida como principal!');
+                                          setTimeout(() => setFeedback(''), 3000);
+                                          
+                                          // Reload list
+                                          const list = await DbService.getProductMedia(selectedAdminProduct.id);
+                                          setProductMediaList(list);
+                                          setSelectedAdminProduct({
+                                            ...selectedAdminProduct,
+                                            main_image_url: media.url
+                                          });
+                                        }
+                                      } catch (err: any) {
+                                        setErrorMsg('Error al actualizar imagen principal.');
+                                      }
+                                    }}
+                                    className="text-[8px] font-bold text-beyblade-electricCyan hover:underline uppercase tracking-wider"
+                                  >
+                                    Hacer Principal
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+
+                          {productMediaList.length === 0 && !selectedAdminProduct.main_image_url && (
+                            <p className="text-[10px] text-gray-500 italic py-4 col-span-2 text-center font-sans">No hay archivos multimedia cargados para este producto.</p>
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
+                  ) : (
+                    <div className="bg-beyblade-card border border-white/5 rounded-3xl p-12 text-center text-gray-500 space-y-3">
+                      <ShoppingBag className="h-8 w-8 text-gray-600 mx-auto" />
+                      <h4 className="text-xs uppercase font-esports font-bold tracking-widest">Ningún Producto Seleccionado</h4>
+                      <p className="text-[10px] text-gray-400 font-sans max-w-sm mx-auto leading-normal">
+                        Selecciona uno de los productos de la lista de la izquierda para editar sus especificaciones técnicas y administrar sus fotos, ficha de Back Card, videos o manuales PDF.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
               </div>
             </div>
           )}
