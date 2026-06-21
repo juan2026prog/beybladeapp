@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Award, MapPin, Search, ChevronRight, Globe } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { DbService } from '../services/dbService';
-import type { RankingEntry } from '../services/dbService';
+import type { RankingEntry, Season } from '../services/dbService';
 
 // Helper to extract player initials for cyber-avatars
 const getPlayerInitials = (name: string) => {
@@ -79,14 +79,47 @@ export const Rankings: React.FC = () => {
   const [selectedCountry, setSelectedCountry] = useState<string>('UY');
   const [selectedLocality, setSelectedLocality] = useState<string>('Todos');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [selectedSeason, setSelectedSeason] = useState<string>('Global');
+  const [localities, setLocalities] = useState<string[]>([]);
 
+  // Fetch initial lookup lists (Seasons and Localities)
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      try {
+        const [seasonData, localityData] = await Promise.all([
+          DbService.getSeasons(),
+          DbService.getLocalities()
+        ]);
+        const visibleSeasons = seasonData.filter(s => s.status === 'active' || s.status === 'completed');
+        setSeasons(visibleSeasons);
+        
+        const locNames = Array.from(new Set(localityData.map(l => l.name))).sort();
+        setLocalities(locNames);
+      } catch (err) {
+        console.error('Error fetching rankings metadata:', err);
+      }
+    };
+    fetchMetadata();
+  }, []);
+
+  // Fetch rankings whenever selectedSeason changes
   useEffect(() => {
     const fetchRankings = async () => {
-      const data = await DbService.getRankingsList();
-      setRankings(data);
+      try {
+        let data: RankingEntry[] = [];
+        if (selectedSeason === 'Global') {
+          data = await DbService.getRankingsList();
+        } else {
+          data = await DbService.getSeasonRankings(selectedSeason);
+        }
+        setRankings(data);
+      } catch (err) {
+        console.error('Error fetching rankings list:', err);
+      }
     };
     fetchRankings();
-  }, []);
+  }, [selectedSeason]);
 
   // Filter rankings memoized to avoid redundant computation on re-renders
   const filteredRankings = useMemo(() => {
@@ -139,8 +172,25 @@ export const Rankings: React.FC = () => {
             </button>
           </div>
 
-          {/* Territory selects */}
+          {/* Territory & Season selects */}
           <div className="flex flex-wrap gap-3">
+            {/* Season Selector */}
+            <div className="flex items-center gap-2 bg-beyblade-darker px-3 py-1.5 rounded-xl border border-white/5">
+              <span className="text-[10px] uppercase font-bold text-gray-500">Temporada:</span>
+              <select
+                value={selectedSeason}
+                onChange={(e) => setSelectedSeason(e.target.value)}
+                className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer"
+              >
+                <option value="Global">Histórico (Todas)</option>
+                {seasons.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.status === 'active' ? 'Activa' : 'Finalizada'})
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="flex items-center gap-2 bg-beyblade-darker px-3 py-1.5 rounded-xl border border-white/5">
               <Globe className="h-4 w-4 text-gray-500" />
               <select
@@ -162,9 +212,9 @@ export const Rankings: React.FC = () => {
                 className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer"
               >
                 <option value="Todos">Todas las Localidades</option>
-                <option value="Montevideo">Montevideo</option>
-                <option value="Maldonado">Maldonado</option>
-                <option value="Las Piedras">Las Piedras</option>
+                {localities.map(loc => (
+                  <option key={loc} value={loc}>{loc}</option>
+                ))}
               </select>
             </div>
           </div>

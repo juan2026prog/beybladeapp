@@ -152,6 +152,9 @@ export interface Tournament {
   osm_class?: string;
   osm_importance?: number;
   geocoded_at?: string;
+  season_id?: string;
+  max_players?: number;
+  waitlist_enabled?: boolean;
 }
 
 export interface Registration {
@@ -585,7 +588,10 @@ export class DbService {
         osm_type: tournamentData.osm_type || null,
         osm_class: tournamentData.osm_class || null,
         osm_importance: tournamentData.osm_importance || null,
-        geocoded_at: tournamentData.geocoded_at || null
+        geocoded_at: tournamentData.geocoded_at || null,
+        season_id: tournamentData.season_id || null,
+        max_players: tournamentData.max_players || tournamentData.slots_total || 32,
+        waitlist_enabled: tournamentData.waitlist_enabled !== undefined ? tournamentData.waitlist_enabled : true
       })
       .select()
       .single();
@@ -642,6 +648,38 @@ export class DbService {
       .eq('id', registrationId);
       
     if (error) throw error;
+  }
+
+  public static async cancelTournamentRegistration(tournamentId: string, playerId: string): Promise<void> {
+    // 1. Fetch registration
+    const { data: reg, error: fetchErr } = await supabase
+      .from('tournament_registrations')
+      .select('id')
+      .eq('tournament_id', tournamentId)
+      .eq('player_id', playerId)
+      .maybeSingle();
+
+    if (fetchErr) throw fetchErr;
+    if (!reg) return;
+
+    // 2. Delete registration
+    const { error: delErr } = await supabase
+      .from('tournament_registrations')
+      .delete()
+      .eq('id', reg.id);
+    
+    if (delErr) throw delErr;
+
+    // 3. Update slots available
+    const { data: tour } = await supabase.from('tournaments').select('slots_available, waitlist_enabled').eq('id', tournamentId).single();
+    if (tour) {
+      await supabase.from('tournaments').update({ slots_available: tour.slots_available + 1 }).eq('id', tournamentId);
+      
+      // 4. Promote next from waitlist if enabled
+      if (tour.waitlist_enabled) {
+        await this.promoteFromWaitlist(tournamentId);
+      }
+    }
   }
 
   // -------------------------------------------------------------
@@ -768,6 +806,54 @@ export class DbService {
       total_points: r.total_points,
       tournaments_played: r.tournaments_played
     }));
+  }
+
+  public static async getSeasonRankings(seasonId: string): Promise<RankingEntry[]> {
+    // 1. Fetch tournaments belonging to this season
+    const { data: tournaments, error: tErr } = await supabase
+      .from('tournaments')
+      .select('id')
+      .eq('season_id', seasonId);
+    
+    if (tErr) throw tErr;
+    if (!tournaments || tournaments.length === 0) return [];
+    
+    const tournamentIds = tournaments.map(t => t.id);
+
+    // 2. Fetch validated results for these tournaments
+    const { data: results, error: resErr } = await supabase
+      .from('tournament_results')
+      .select('*, players(first_name, last_name, league_id, country_id, locality)')
+      .eq('validated_by_distributor', true)
+      .in('tournament_id', tournamentIds);
+
+    if (resErr) throw resErr;
+
+    // 3. Aggregate points client-side
+    const playerMap: { [id: string]: RankingEntry } = {};
+    for (const r of (results || [])) {
+      const p = r.players as any;
+      if (!p) continue;
+      
+      const playerId = r.player_id;
+      const playerName = `${p.first_name} ${p.last_name}`;
+      
+      if (!playerMap[playerId]) {
+        playerMap[playerId] = {
+          player_id: playerId,
+          player_name: playerName,
+          league_id: p.league_id,
+          country_id: p.country_id,
+          locality: p.locality,
+          total_points: 0,
+          tournaments_played: 0
+        };
+      }
+      playerMap[playerId].total_points += r.points_awarded;
+      playerMap[playerId].tournaments_played += 1;
+    }
+
+    return Object.values(playerMap).sort((a, b) => b.total_points - a.total_points);
   }
 
   // -------------------------------------------------------------
@@ -1140,6 +1226,536 @@ export class DbService {
       .upsert({ key, value });
     if (error) throw error;
   }
+
+  // -------------------------------------------------------------
+  // SEASONS
+  // -------------------------------------------------------------
+  public static async getSeasons(): Promise<Season[]> {
+    const { data, error } = await supabase.from('seasons').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
+
+  public static async createSeason(season: Omit<Season, 'id' | 'created_at'>): Promise<Season> {
+    const { data, error } = await supabase.from('seasons').insert(season).select().single();
+    if (error) throw error;
+    return data;
+  }
+
+  public static async updateSeasonStatus(id: string, status: Season['status']): Promise<void> {
+    const { error } = await supabase.from('seasons').update({ status }).eq('id', id);
+    if (error) throw error;
+  }
+
+  // -------------------------------------------------------------
+  // WAITLIST
+  // -------------------------------------------------------------
+  public static async getWaitlist(tournamentId: string): Promise<WaitlistEntry[]> {
+    const { data, error } = await supabase
+      .from('waitlist')
+      .select('*, players(first_name, last_name)')
+      .eq('tournament_id', tournamentId)
+      .order('position', { ascending: true });
+    if (error) throw error;
+    return (data || []).map(w => ({
+      ...w,
+      player_name: w.players ? `${w.players.first_name} ${w.players.last_name}` : 'Jugador'
+    }));
+  }
+
+  public static async joinWaitlist(tournamentId: string, playerId: string): Promise<void> {
+    // Get next position
+    const { data: currentWaitlist, error: listErr } = await supabase
+      .from('waitlist')
+      .select('position')
+      .eq('tournament_id', tournamentId)
+      .order('position', { ascending: false })
+      .limit(1);
+    
+    if (listErr) throw listErr;
+    const nextPos = currentWaitlist && currentWaitlist.length > 0 ? currentWaitlist[0].position + 1 : 1;
+
+    const { error } = await supabase.from('waitlist').insert({
+      tournament_id: tournamentId,
+      player_id: playerId,
+      position: nextPos
+    });
+    if (error) throw error;
+  }
+
+  public static async leaveWaitlist(tournamentId: string, playerId: string): Promise<void> {
+    // 1. Get leaving entry position
+    const { data: entry, error: getErr } = await supabase
+      .from('waitlist')
+      .select('position')
+      .eq('tournament_id', tournamentId)
+      .eq('player_id', playerId)
+      .maybeSingle();
+    
+    if (getErr) throw getErr;
+    if (!entry) return;
+
+    const pos = entry.position;
+
+    // 2. Delete entry
+    const { error: delErr } = await supabase
+      .from('waitlist')
+      .delete()
+      .eq('tournament_id', tournamentId)
+      .eq('player_id', playerId);
+    
+    if (delErr) throw delErr;
+
+    // 3. Shift positions for entries after this
+    const { error: shiftErr } = await supabase
+      .rpc('shift_waitlist_positions', {
+        t_id: tournamentId,
+        from_pos: pos
+      });
+    
+    // Fallback if RPC is not defined: do it client side
+    if (shiftErr) {
+      const { data: subsequent } = await supabase
+        .from('waitlist')
+        .select('*')
+        .eq('tournament_id', tournamentId)
+        .gt('position', pos)
+        .order('position', { ascending: true });
+      
+      if (subsequent) {
+        for (const sub of subsequent) {
+          await supabase
+            .from('waitlist')
+            .update({ position: sub.position - 1 })
+            .eq('id', sub.id);
+        }
+      }
+    }
+  }
+
+  public static async promoteFromWaitlist(tournamentId: string): Promise<void> {
+    // 1. Fetch first waitlist entry
+    const { data: firstEntry, error: fetchErr } = await supabase
+      .from('waitlist')
+      .select('*, players(first_name, last_name, email)')
+      .eq('tournament_id', tournamentId)
+      .order('position', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (fetchErr) throw fetchErr;
+    if (!firstEntry) return;
+
+    // 2. Insert into registrations
+    const { error: insErr } = await supabase
+      .from('tournament_registrations')
+      .insert({
+        tournament_id: tournamentId,
+        player_id: firstEntry.player_id,
+        checked_in: false
+      });
+    
+    if (insErr) throw insErr;
+
+    // 3. Delete from waitlist and shift others
+    await this.leaveWaitlist(tournamentId, firstEntry.player_id);
+
+    // 4. Update slots_available
+    const { data: tour } = await supabase.from('tournaments').select('slots_available, name').eq('id', tournamentId).single();
+    if (tour && tour.slots_available > 0) {
+      await supabase.from('tournaments').update({ slots_available: tour.slots_available - 1 }).eq('id', tournamentId);
+    }
+
+    // 5. Send promotion notification
+    try {
+      const { NotificationService } = await import('./notificationService');
+      await NotificationService.notifyUser(firstEntry.player_id, 'waitlist_promoted', {
+        title: '¡Promovido al torneo principal!',
+        message: `Saliste de la lista de espera y ya estás inscrito en "${tour?.name || 'Torneo Oficial'}".`,
+        url: `/tournaments`
+      });
+    } catch (notifErr) {
+      console.error('Error dispatching waitlist promotion notification:', notifErr);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // ATTENDANCE CONFIRMATIONS
+  // -------------------------------------------------------------
+  public static async getAttendanceConfirmations(tournamentId: string): Promise<AttendanceConfirmation[]> {
+    const { data, error } = await supabase
+      .from('attendance_confirmations')
+      .select('*, players(first_name, last_name)')
+      .eq('tournament_id', tournamentId);
+    if (error) throw error;
+    return (data || []).map(a => ({
+      ...a,
+      player_name: a.players ? `${a.players.first_name} ${a.players.last_name}` : 'Jugador'
+    }));
+  }
+
+  public static async setAttendanceConfirmation(tournamentId: string, playerId: string, confirmed: boolean): Promise<void> {
+    const { error } = await supabase
+      .from('attendance_confirmations')
+      .upsert({
+        tournament_id: tournamentId,
+        player_id: playerId,
+        confirmed,
+        confirmed_at: new Date().toISOString()
+      }, { onConflict: 'tournament_id,player_id' });
+    
+    if (error) throw error;
+
+    // If declined (confirmed = false), cancel registration and promote next
+    if (!confirmed) {
+      // 1. Fetch registration to make sure they are registered
+      const { data: reg } = await supabase
+        .from('tournament_registrations')
+        .select('*')
+        .eq('tournament_id', tournamentId)
+        .eq('player_id', playerId)
+        .maybeSingle();
+
+      if (reg) {
+        // 2. Remove registration
+        await supabase
+          .from('tournament_registrations')
+          .delete()
+          .eq('tournament_id', tournamentId)
+          .eq('player_id', playerId);
+
+        // 3. Update slots available
+        const { data: tour } = await supabase.from('tournaments').select('slots_available, waitlist_enabled').eq('id', tournamentId).single();
+        if (tour) {
+          await supabase.from('tournaments').update({ slots_available: tour.slots_available + 1 }).eq('id', tournamentId);
+          
+          // 4. Promote next from waitlist if enabled
+          if (tour.waitlist_enabled) {
+            await this.promoteFromWaitlist(tournamentId);
+          }
+        }
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
+  // PLAYER STATISTICS
+  // -------------------------------------------------------------
+  public static async getPlayerStatistics(playerId: string): Promise<PlayerStatistics | null> {
+    const { data, error } = await supabase
+      .from('player_statistics')
+      .select('*')
+      .eq('player_id', playerId)
+      .maybeSingle();
+    
+    if (error) throw error;
+    return data || null;
+  }
+
+  // -------------------------------------------------------------
+  // BRACKETS
+  // -------------------------------------------------------------
+  public static async getTournamentBrackets(tournamentId: string): Promise<Bracket[]> {
+    const { data, error } = await supabase
+      .from('brackets')
+      .select('*')
+      .eq('tournament_id', tournamentId);
+    if (error) throw error;
+    return data || [];
+  }
+
+  public static async getBracketMatches(bracketId: string): Promise<BracketMatch[]> {
+    const { data, error } = await supabase
+      .from('bracket_matches')
+      .select('*, p1:player1_id(first_name, last_name), p2:player2_id(first_name, last_name), w:winner_id(first_name, last_name)')
+      .eq('bracket_id', bracketId)
+      .order('round_number', { ascending: true })
+      .order('match_number', { ascending: true });
+    
+    if (error) throw error;
+
+    return (data || []).map(m => {
+      const p1Data = (m as any).p1;
+      const p2Data = (m as any).p2;
+      const wData = (m as any).w;
+      return {
+        ...m,
+        player1_name: p1Data ? `${p1Data.first_name} ${p1Data.last_name}` : undefined,
+        player2_name: p2Data ? `${p2Data.first_name} ${p2Data.last_name}` : undefined,
+        winner_name: wData ? `${wData.first_name} ${wData.last_name}` : undefined
+      };
+    });
+  }
+
+  public static async generateTournamentBracket(tournamentId: string, generatedById: string): Promise<Bracket> {
+    // 1. Fetch checked-in players
+    const { data: checkedInRegs, error: regsErr } = await supabase
+      .from('tournament_registrations')
+      .select('player_id, players(first_name, last_name)')
+      .eq('tournament_id', tournamentId)
+      .eq('checked_in', true);
+
+    if (regsErr) throw regsErr;
+    if (!checkedInRegs || checkedInRegs.length < 2) {
+      throw new Error('Debe haber al menos 2 jugadores acreditados (checked-in) para poder generar el bracket.');
+    }
+
+    const playersList = checkedInRegs.map(r => r.player_id);
+    const N = playersList.length;
+
+    // 2. Calculate next power of 2
+    let P = 2;
+    while (P < N) {
+      P *= 2;
+    }
+
+    // 3. Create bracket record
+    const { data: bracket, error: bracketErr } = await supabase
+      .from('brackets')
+      .insert({
+        tournament_id: tournamentId,
+        type: 'single_elimination',
+        status: 'active'
+      })
+      .select()
+      .single();
+
+    if (bracketErr) throw bracketErr;
+
+    // 4. Generate match nodes bottom-up (tree structure)
+    const k = Math.log2(P);
+    const matchesMap: { [key: string]: string } = {};
+
+    for (let r = k; r >= 1; r--) {
+      const matchCountInRound = Math.pow(2, k - r);
+      for (let m = 0; m < matchCountInRound; m++) {
+        let nextMatchId: string | null = null;
+        let nextMatchSlot: number | null = null;
+        if (r < k) {
+          const parentMatchNum = Math.floor(m / 2);
+          const parentKey = `${r + 1}_${parentMatchNum}`;
+          nextMatchId = matchesMap[parentKey] || null;
+          nextMatchSlot = m % 2 === 0 ? 1 : 2;
+        }
+
+        const { data: insertedMatch, error: matchErr } = await supabase
+          .from('bracket_matches')
+          .insert({
+            bracket_id: bracket.id,
+            round_number: r,
+            match_number: m,
+            player1_id: null,
+            player2_id: null,
+            winner_id: null,
+            player1_score: 0,
+            player2_score: 0,
+            bye_assigned: false,
+            next_match_id: nextMatchId,
+            next_match_player_slot: nextMatchSlot,
+            status: 'pending'
+          })
+          .select('id')
+          .single();
+
+        if (matchErr) throw matchErr;
+        matchesMap[`${r}_${m}`] = insertedMatch.id;
+      }
+    }
+
+    // 5. Shuffle and BYEs
+    const seed = Math.random().toString(36).substring(7);
+    const shuffled = [...playersList].sort(() => Math.random() - 0.5);
+
+    const B = P - N;
+    const BYEPlayers = shuffled.slice(0, B);
+    const playingPlayers = shuffled.slice(B);
+
+    for (const player of BYEPlayers) {
+      await supabase.from('bye_draw_logs').insert({
+        tournament_id: tournamentId,
+        player_id: player,
+        generated_by: generatedById,
+        seed_used: seed
+      });
+    }
+
+    const round1Count = P / 2;
+    for (let m = 0; m < round1Count; m++) {
+      const matchId = matchesMap[`1_${m}`];
+      if (m < B) {
+        const player = BYEPlayers[m];
+        await supabase
+          .from('bracket_matches')
+          .update({
+            player1_id: player,
+            player2_id: null,
+            winner_id: player,
+            bye_assigned: true,
+            status: 'completed'
+          })
+          .eq('id', matchId);
+
+        const nextMatchKey = `2_${Math.floor(m / 2)}`;
+        const nextMatchId = matchesMap[nextMatchKey];
+        const nextSlot = m % 2 === 0 ? 'player1_id' : 'player2_id';
+        await supabase
+          .from('bracket_matches')
+          .update({ [nextSlot]: player })
+          .eq('id', nextMatchId);
+      } else {
+        const playingIndex = m - B;
+        const p1 = playingPlayers[2 * playingIndex];
+        const p2 = playingPlayers[2 * playingIndex + 1];
+        await supabase
+          .from('bracket_matches')
+          .update({
+            player1_id: p1,
+            player2_id: p2,
+            bye_assigned: false,
+            status: 'pending'
+          })
+          .eq('id', matchId);
+      }
+    }
+
+    try {
+      const { data: tour } = await supabase.from('tournaments').select('name').eq('id', tournamentId).single();
+      const { NotificationService } = await import('./notificationService');
+      for (const player of playersList) {
+        const isBye = BYEPlayers.includes(player);
+        await NotificationService.notifyUser(player, isBye ? 'bye_assigned' : 'bracket_published', {
+          title: isBye ? 'Tenes BYE en Round 1' : 'Bracket del torneo publicado',
+          message: isBye 
+            ? `Recibiste un pase libre (BYE) para la primera ronda en "${tour?.name}". Pasas directo a la ronda 2.` 
+            : `El bracket de cruces oficial de "${tour?.name}" ha sido publicado. ¡Revisa tu primer combate!`,
+          url: `/tournaments`
+        });
+      }
+    } catch (notifErr) {
+      console.error('Error dispatching bracket notifications:', notifErr);
+    }
+
+    return bracket;
+  }
+
+  public static async submitMatchResult(matchId: string, winnerId: string, p1Score: number, p2Score: number): Promise<void> {
+    const { data: match, error: fetchErr } = await supabase
+      .from('bracket_matches')
+      .select('*, brackets(tournament_id)')
+      .eq('id', matchId)
+      .single();
+
+    if (fetchErr) throw fetchErr;
+
+    const { error: updErr } = await supabase
+      .from('bracket_matches')
+      .update({
+        winner_id: winnerId,
+        player1_score: p1Score,
+        player2_score: p2Score,
+        status: 'completed'
+      })
+      .eq('id', matchId);
+
+    if (updErr) throw updErr;
+
+    if (match.next_match_id) {
+      const nextSlot = match.next_match_player_slot === 1 ? 'player1_id' : 'player2_id';
+      await supabase
+        .from('bracket_matches')
+        .update({ [nextSlot]: winnerId })
+        .eq('id', match.next_match_id);
+    } else {
+      await supabase
+        .from('brackets')
+        .update({ status: 'completed' })
+        .eq('id', match.bracket_id);
+    }
+  }
+}
+
+export interface Season {
+  id?: string;
+  name: string;
+  country_id: string;
+  league_type: 'junior' | 'open';
+  start_date: string;
+  end_date: string;
+  description?: string;
+  status: 'draft' | 'active' | 'completed';
+  created_at?: string;
+}
+
+export interface Bracket {
+  id?: string;
+  tournament_id: string;
+  type: 'single_elimination' | 'double_elimination' | 'round_robin' | 'swiss';
+  status: 'draft' | 'active' | 'completed';
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BracketMatch {
+  id?: string;
+  bracket_id: string;
+  round_number: number;
+  match_number: number;
+  player1_id?: string | null;
+  player2_id?: string | null;
+  winner_id?: string | null;
+  player1_score: number;
+  player2_score: number;
+  bye_assigned: boolean;
+  next_match_id?: string | null;
+  next_match_player_slot?: 1 | 2 | null;
+  status: 'pending' | 'completed';
+  created_at?: string;
+  player1_name?: string;
+  player2_name?: string;
+  winner_name?: string;
+}
+
+export interface ByeDrawLog {
+  id?: string;
+  tournament_id: string;
+  player_id: string;
+  player_name?: string;
+  generated_at?: string;
+  generated_by?: string;
+  seed_used: string;
+}
+
+export interface WaitlistEntry {
+  id?: string;
+  tournament_id: string;
+  player_id: string;
+  player_name?: string;
+  position: number;
+  created_at?: string;
+}
+
+export interface AttendanceConfirmation {
+  id?: string;
+  tournament_id: string;
+  player_id: string;
+  confirmed: boolean | null;
+  confirmed_at?: string;
+  created_at?: string;
+  player_name?: string;
+}
+
+export interface PlayerStatistics {
+  player_id: string;
+  tournaments_played: number;
+  wins: number;
+  losses: number;
+  podiums_first: number;
+  podiums_second: number;
+  podiums_third: number;
+  podiums_fourth: number;
+  points_total: number;
+  win_rate?: number;
+  updated_at?: string;
 }
 
 export interface NotificationPreferences {

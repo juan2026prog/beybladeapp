@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { Trophy, Calendar, MapPin, Users, Award, Shield, AlertTriangle, CheckCircle, Info, Navigation, Loader2, List, Map } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { DbService } from '../services/dbService';
-import type { Tournament, Player, Registration } from '../services/dbService';
+import type { Tournament, Player, Registration, WaitlistEntry } from '../services/dbService';
 import { OpenMap } from '../components/OpenMap';
 import type { MapMarker } from '../components/OpenMap';
 import { calculateDistanceKm, formatDistance } from '../utils/distance';
@@ -13,6 +13,7 @@ export const Tournaments: React.FC = () => {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [selectedTour, setSelectedTour] = useState<Tournament | null>(null);
   const [registrants, setRegistrants] = useState<Registration[]>([]);
+  const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
   const [currentUser, setCurrentUser] = useState<any>({ id: 'usr-visitor', role: 'Visitante', email: '' });
   const [currentPlayerData, setCurrentPlayerData] = useState<Player | null>(null);
 
@@ -148,6 +149,17 @@ export const Tournaments: React.FC = () => {
     setErrorMsg('');
     const regs = await DbService.getTournamentRegistrations(tour.id);
     setRegistrants(regs);
+    try {
+      if (tour.waitlist_enabled) {
+        const wl = await DbService.getWaitlist(tour.id);
+        setWaitlist(wl);
+      } else {
+        setWaitlist([]);
+      }
+    } catch (wlErr) {
+      console.error('Error fetching waitlist:', wlErr);
+      setWaitlist([]);
+    }
     setLoadingDetails(false);
   };
 
@@ -169,19 +181,54 @@ export const Tournaments: React.FC = () => {
 
     try {
       const fullName = `${currentPlayerData.first_name} ${currentPlayerData.last_name}`;
-      await DbService.registerForTournament(selectedTour.id, currentPlayerData.id, fullName);
-      setSuccessMsg('¡Te has inscrito exitosamente a este torneo!');
       
-      triggerSimulatedEmail(
-        currentPlayerData.email,
-        '¡Inscripción Confirmada! - Beyblade Uruguay',
-        `Hola ${currentPlayerData.first_name}, tu inscripción al torneo "${selectedTour.name}" ha sido procesada con éxito. Recuerda presentarte a las ${selectedTour.time}hs con tu BEY-ID listo en tu dispositivo para la acreditación QR.`
-      );
+      if (selectedTour.slots_available > 0) {
+        await DbService.registerForTournament(selectedTour.id, currentPlayerData.id, fullName);
+        setSuccessMsg('¡Te has inscrito exitosamente a este torneo!');
+        
+        triggerSimulatedEmail(
+          currentPlayerData.email,
+          '¡Inscripción Confirmada! - Beyblade Uruguay',
+          `Hola ${currentPlayerData.first_name}, tu inscripción al torneo "${selectedTour.name}" ha sido procesada con éxito. Recuerda presentarte a las ${selectedTour.time}hs con tu BEY-ID listo en tu dispositivo para la acreditación QR.`
+        );
+      } else if (selectedTour.waitlist_enabled) {
+        await DbService.joinWaitlist(selectedTour.id, currentPlayerData.id);
+        setSuccessMsg('Cupos completos. Te has unido a la lista de espera de este torneo.');
+      } else {
+        setErrorMsg('El torneo está lleno y la lista de espera no está habilitada.');
+        return;
+      }
 
       // Reload lists
       await loadTournaments();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Error al inscribirse.');
+      setErrorMsg(err.message || 'Error al procesar la inscripción.');
+    }
+  };
+
+  const handleCancelRegistration = async () => {
+    if (!selectedTour || !currentPlayerData) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      await DbService.cancelTournamentRegistration(selectedTour.id, currentPlayerData.id);
+      setSuccessMsg('Tu inscripción ha sido cancelada y tu cupo ha sido liberado.');
+      await loadTournaments();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al cancelar la inscripción.');
+    }
+  };
+
+  const handleLeaveWaitlist = async () => {
+    if (!selectedTour || !currentPlayerData) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      await DbService.leaveWaitlist(selectedTour.id, currentPlayerData.id);
+      setSuccessMsg('Has salido de la lista de espera.');
+      await loadTournaments();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al salir de la lista de espera.');
     }
   };
 
@@ -255,6 +302,10 @@ export const Tournaments: React.FC = () => {
       data: {}
     });
   }
+
+  const isAlreadyRegistered = registrants.some(r => r.player_id === currentPlayerData?.id);
+  const waitlistEntry = waitlist.find(w => w.player_id === currentPlayerData?.id);
+  const isAlreadyInWaitlist = !!waitlistEntry;
 
   return (
     <div className="space-y-6 text-left">
@@ -570,13 +621,43 @@ export const Tournaments: React.FC = () => {
               {/* Action and Participants List */}
               <div className="space-y-4 pt-2">
                 {selectedTour.status === 'publicado' && (
-                  <button
-                    onClick={handleRegister}
-                    disabled={selectedTour.slots_available <= 0}
-                    className="w-full py-4 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 disabled:bg-gray-800 disabled:text-gray-500 disabled:border-transparent text-beyblade-darker font-black font-esports text-sm uppercase tracking-widest rounded-xl transition-all shadow-neon-cyan disabled:shadow-none hover:scale-[1.01] active:scale-95"
-                  >
-                    {selectedTour.slots_available <= 0 ? 'Cupos Completos' : 'Inscribirme al Evento'}
-                  </button>
+                  <>
+                    {isAlreadyRegistered ? (
+                      <div className="space-y-2">
+                        <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs p-3.5 rounded-xl flex items-center justify-between font-bold">
+                          <span>✓ Estás inscripto en este torneo</span>
+                          <button
+                            onClick={handleCancelRegistration}
+                            className="text-[10px] text-beyblade-electricRed hover:underline uppercase font-black tracking-wider"
+                          >
+                            Cancelar Inscripción
+                          </button>
+                        </div>
+                      </div>
+                    ) : isAlreadyInWaitlist ? (
+                      <div className="space-y-2">
+                        <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs p-3.5 rounded-xl flex items-center justify-between font-bold">
+                          <span>⏱ En lista de espera (Puesto {waitlistEntry?.position})</span>
+                          <button
+                            onClick={handleLeaveWaitlist}
+                            className="text-[10px] text-beyblade-electricRed hover:underline uppercase font-black tracking-wider"
+                          >
+                            Salir de la lista
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleRegister}
+                        disabled={selectedTour.slots_available <= 0 && !selectedTour.waitlist_enabled}
+                        className="w-full py-4 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 disabled:bg-gray-800 disabled:text-gray-500 disabled:border-transparent text-beyblade-darker font-black font-esports text-sm uppercase tracking-widest rounded-xl transition-all shadow-neon-cyan disabled:shadow-none hover:scale-[1.01] active:scale-95"
+                      >
+                        {selectedTour.slots_available <= 0 
+                          ? (selectedTour.waitlist_enabled ? 'Unirse a Lista de Espera' : 'Cupos Completos') 
+                          : 'Inscribirme al Evento'}
+                      </button>
+                    )}
+                  </>
                 )}
 
                 {/* Registrants / checked-in list */}
@@ -613,6 +694,28 @@ export const Tournaments: React.FC = () => {
                     )}
                   </div>
                 </div>
+
+                {/* Waitlist list */}
+                {selectedTour.waitlist_enabled && waitlist.length > 0 && (
+                  <div className="space-y-3 pt-2">
+                    <h4 className="text-[10px] text-gray-500 font-black font-esports uppercase tracking-widest flex items-center gap-1.5">
+                      ⏱ Lista de Espera ({waitlist.length})
+                    </h4>
+                    <div className="bg-beyblade-darker/60 rounded-2xl border border-white/5 overflow-hidden divide-y divide-white/5">
+                      {waitlist.map((w) => (
+                        <div key={w.id} className="p-3.5 flex items-center justify-between text-xs font-semibold">
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-500 font-extrabold font-esports w-5 text-left">{w.position}.</span>
+                            <span className="font-extrabold text-white uppercase tracking-wide">{w.player_name}</span>
+                          </div>
+                          <span className="text-[9px] text-amber-400 bg-amber-400/10 border border-amber-400/25 px-2 py-0.5 rounded font-black font-esports uppercase tracking-widest">
+                            En espera
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           ) : (

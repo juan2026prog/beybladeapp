@@ -16,7 +16,7 @@ export class NotificationService {
    */
   public static async notifyUser(
     userId: string,
-    type: 'new_tournament' | 'new_journey' | 'points_awarded',
+    type: 'new_tournament' | 'new_journey' | 'points_awarded' | 'waitlist_promoted' | 'attendance_required' | 'bye_assigned' | 'bracket_published',
     payload: NotificationPayload
   ): Promise<{ inApp: string; push: string; whatsapp: string }> {
     const deliveryReport = { inApp: 'skipped', push: 'skipped', whatsapp: 'skipped' };
@@ -46,6 +46,11 @@ export class NotificationService {
         inAppEnabled = prefs.points_awarded_in_app;
         pushEnabled = prefs.points_awarded_push;
         whatsappEnabled = prefs.points_awarded_whatsapp;
+      } else {
+        // Critical transactional alerts (waitlist, attendance, brackets, bye)
+        inAppEnabled = true;
+        pushEnabled = prefs.push_enabled;
+        whatsappEnabled = prefs.whatsapp_opt_in && (type === 'waitlist_promoted' || type === 'attendance_required');
       }
 
       // 3. Process In-App notification
@@ -53,9 +58,7 @@ export class NotificationService {
       if (inAppEnabled) {
         try {
           // Re-map type for notifications table
-          let mappedType: 'torneo' | 'inscripcion' | 'resultados' | 'puntos' | 'tiendas' | 'lanzamiento' | 'new_tournament' | 'new_journey' | 'points_awarded' = 'new_tournament';
-          if (type === 'new_journey') mappedType = 'new_journey';
-          if (type === 'points_awarded') mappedType = 'points_awarded';
+          let mappedType: any = type;
 
           // Insert into notifications
           const { data: notifData, error: notifErr } = await supabase
@@ -162,7 +165,7 @@ export class NotificationService {
     userId: string,
     notificationId: string | null,
     channel: 'in_app' | 'push' | 'whatsapp',
-    type: 'new_tournament' | 'new_journey' | 'points_awarded',
+    type: string,
     status: 'pending' | 'sent' | 'failed' | 'skipped',
     errorMessage?: string
   ): Promise<void> {

@@ -3,7 +3,8 @@ import {
   Shield, Check, X, ToggleLeft, ToggleRight, Plus, 
   Trophy, Settings, CheckSquare, Camera,
   TrendingUp, BarChart2, Flag, Package, Map, Users,
-  ShoppingBag, MapPin, AlertCircle, Film, Trash2
+  ShoppingBag, MapPin, AlertCircle, Film, Trash2,
+  Calendar, Printer, Loader2, List
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabaseClient';
@@ -13,7 +14,8 @@ import { QRScanner } from '../components/QRScanner';
 import { RealQRScanner } from '../components/RealQRScanner';
 import type { 
   ModuleConfig, Player, Tournament, 
-  Organizer, Judge, Store as StoreType, StoreStock, Registration, Product, Journey, ProductMedia
+  Organizer, Judge, Store as StoreType, StoreStock, Registration, Product, Journey, ProductMedia,
+  Season, Bracket, BracketMatch, WaitlistEntry, AttendanceConfirmation
 } from '../services/dbService';
 import { LocationAutocomplete } from '../components/LocationAutocomplete';
 import type { NormalizedLocation } from '../services/geocodingService';
@@ -25,7 +27,7 @@ export const AdminDashboard: React.FC = () => {
 
   // Tab states
   const [activeSuperTab, setActiveSuperTab] = useState<'analytics' | 'modules' | 'retail' | 'settings' | 'products'>('analytics');
-  const [activeDistributorTab, setActiveDistributorTab] = useState<'certifications' | 'stats' | 'retail'>('certifications');
+  const [activeDistributorTab, setActiveDistributorTab] = useState<'certifications' | 'stats' | 'retail' | 'seasons'>('certifications');
 
   // Hero Banners and Settings states
   const [banners, setBanners] = useState<any[]>([]);
@@ -110,6 +112,29 @@ export const AdminDashboard: React.FC = () => {
   const [selectedManageTour, setSelectedManageTour] = useState<Tournament | null>(null);
   const [manageRegistrations, setManageRegistrations] = useState<Registration[]>([]);
   const [placements, setPlacements] = useState<{ [playerId: string]: number }>({});
+
+  // Phase 3.0 Competitive states
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [newTourSeasonId, setNewTourSeasonId] = useState('');
+  
+  // Season form states for distributor
+  const [newSeasonName, setNewSeasonName] = useState('');
+  const [newSeasonLeague, setNewSeasonLeague] = useState<'junior' | 'open'>('open');
+  const [newSeasonStartDate, setNewSeasonStartDate] = useState('');
+  const [newSeasonEndDate, setNewSeasonEndDate] = useState('');
+  const [newSeasonDesc, setNewSeasonDesc] = useState('');
+
+  // Tournament details competitive states for organizer
+  const [_tournamentBrackets, setTournamentBrackets] = useState<Bracket[]>([]);
+  const [activeBracket, setActiveBracket] = useState<Bracket | null>(null);
+  const [bracketMatches, setBracketMatches] = useState<BracketMatch[]>([]);
+  const [waitlistEntries, setWaitlistEntries] = useState<WaitlistEntry[]>([]);
+  const [attendanceConfirmations, setAttendanceConfirmations] = useState<AttendanceConfirmation[]>([]);
+  const [bracketLoading, setBracketLoading] = useState(false);
+  const [selectedMatchForScore, setSelectedMatchForScore] = useState<BracketMatch | null>(null);
+  const [scoreP1, setScoreP1] = useState(0);
+  const [scoreP2, setScoreP2] = useState(0);
+  const [organizerTournamentsTab, setOrganizerTournamentsTab] = useState<'acreditacion' | 'brackets'>('acreditacion');
 
   const [feedback, setFeedback] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -380,6 +405,13 @@ export const AdminDashboard: React.FC = () => {
 
     const journeysList = await DbService.getJourneys();
     setJourneys(journeysList);
+
+    try {
+      const seasonsList = await DbService.getSeasons();
+      setSeasons(seasonsList);
+    } catch (err) {
+      console.error('Error fetching seasons:', err);
+    }
   };
 
   useEffect(() => {
@@ -585,7 +617,8 @@ export const AdminDashboard: React.FC = () => {
         osm_type: newTourLocation.osm_type,
         osm_class: newTourLocation.osm_class,
         osm_importance: newTourLocation.osm_importance,
-        geocoded_at: new Date().toISOString()
+        geocoded_at: new Date().toISOString(),
+        season_id: newTourSeasonId || undefined
       });
 
       // Get locality_id for notifications
@@ -616,6 +649,7 @@ export const AdminDashboard: React.FC = () => {
       setNewTourDate('');
       setNewTourTime('');
       setNewTourDesc('');
+      setNewTourSeasonId('');
 
       loadData();
     } catch (err: any) {
@@ -719,6 +753,34 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  const refreshManageTournamentCompetitiveData = async (tourId: string) => {
+    try {
+      const waitlist = await DbService.getWaitlist(tourId);
+      setWaitlistEntries(waitlist);
+
+      const confirmations = await DbService.getAttendanceConfirmations(tourId);
+      setAttendanceConfirmations(confirmations);
+
+      const brackets = await DbService.getTournamentBrackets(tourId);
+      setTournamentBrackets(brackets);
+      
+      if (brackets.length > 0) {
+        const active = brackets.find(b => b.status === 'active') || brackets.find(b => b.status === 'completed') || brackets[0];
+        setActiveBracket(active);
+        const matches = await DbService.getBracketMatches(active.id!);
+        setBracketMatches(matches);
+      } else {
+        setActiveBracket(null);
+        setBracketMatches([]);
+      }
+
+      const regs = await DbService.getTournamentRegistrations(tourId);
+      setManageRegistrations(regs);
+    } catch (err) {
+      console.error('Error refreshing competitive data:', err);
+    }
+  };
+
   const handleSelectManageTournament = async (tour: Tournament) => {
     setSelectedManageTour(tour);
     const regs = await DbService.getTournamentRegistrations(tour.id);
@@ -730,6 +792,10 @@ export const AdminDashboard: React.FC = () => {
       placeObj[r.player_id] = idx + 1;
     });
     setPlacements(placeObj);
+
+    setBracketLoading(true);
+    await refreshManageTournamentCompetitiveData(tour.id);
+    setBracketLoading(false);
   };
 
   const handleCheckInToggle = async (regId: string, checked: boolean) => {
@@ -737,6 +803,54 @@ export const AdminDashboard: React.FC = () => {
     if (selectedManageTour) {
       const regs = await DbService.getTournamentRegistrations(selectedManageTour.id);
       setManageRegistrations(regs);
+      await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+    }
+  };
+
+  const handleGenerateBracket = async () => {
+    if (!selectedManageTour) return;
+    setBracketLoading(true);
+    setErrorMsg('');
+    setFeedback('');
+    try {
+      await DbService.generateTournamentBracket(selectedManageTour.id, currentUser.id);
+      setFeedback('¡Bracket y sorteo de BYEs generados con éxito! Los competidores han sido notificados.');
+      await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+      setTimeout(() => setFeedback(''), 3500);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al generar el bracket.');
+    } finally {
+      setBracketLoading(false);
+    }
+  };
+
+  const handleSubmitBracketScore = async (matchId: string, winnerId: string, p1Score: number, p2Score: number) => {
+    if (!selectedManageTour) return;
+    setBracketLoading(true);
+    setErrorMsg('');
+    setFeedback('');
+    try {
+      await DbService.submitMatchResult(matchId, winnerId, p1Score, p2Score);
+      setFeedback('Resultado del combate registrado correctamente. Brackets actualizados.');
+      await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+      setSelectedMatchForScore(null);
+      setTimeout(() => setFeedback(''), 3000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al registrar el resultado.');
+    } finally {
+      setBracketLoading(false);
+    }
+  };
+
+  const handleUpdateAttendanceConfirmation = async (playerId: string, confirmed: boolean) => {
+    if (!selectedManageTour) return;
+    try {
+      await DbService.setAttendanceConfirmation(selectedManageTour.id, playerId, confirmed);
+      setFeedback(confirmed ? 'Asistencia confirmada.' : 'Asistencia rechazada y plaza liberada.');
+      await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+      setTimeout(() => setFeedback(''), 3000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al actualizar confirmación.');
     }
   };
 
@@ -2520,6 +2634,18 @@ export const AdminDashboard: React.FC = () => {
               </span>
             </button>
             <button
+              onClick={() => setActiveDistributorTab('seasons')}
+              className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                activeDistributorTab === 'seasons'
+                  ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Calendar className="h-4 w-4" /> Temporadas y Ligas
+              </span>
+            </button>
+            <button
               onClick={() => setActiveDistributorTab('stats')}
               className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
                 activeDistributorTab === 'stats'
@@ -2653,6 +2779,193 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                 </div>
 
+              </div>
+            </div>
+          )}
+
+          {/* Tab: Seasons & Leagues */}
+          {activeDistributorTab === 'seasons' && (
+            <div className="space-y-6 animate-fade-in text-left">
+              <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                <h2 className="text-lg font-black text-white uppercase tracking-wide flex items-center gap-2">
+                  <Calendar className="h-5.5 w-5.5 text-beyblade-electricCyan" /> Gestión de Temporadas y Ligas
+                </h2>
+                <span className="bg-white/5 border border-white/10 px-3 py-1 rounded-xl text-xs font-bold text-gray-400">
+                  {seasons.filter(s => s.country_id === currentUser.country_id).length} Temporadas registradas
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Left: Create Season Form */}
+                <div className="bg-beyblade-card border border-white/5 p-6 rounded-3xl space-y-4">
+                  <h3 className="font-extrabold text-sm text-white uppercase tracking-wider font-title">Nueva Temporada</h3>
+                  <div className="space-y-3 text-xs">
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-gray-500 font-bold uppercase">Nombre de Temporada</label>
+                      <input
+                        type="text"
+                        value={newSeasonName}
+                        onChange={(e) => setNewSeasonName(e.target.value)}
+                        placeholder="Ej: Temporada Open Uruguay 2026"
+                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-gray-500 font-bold uppercase">Liga / Categoría</label>
+                      <select
+                        value={newSeasonLeague}
+                        onChange={(e) => setNewSeasonLeague(e.target.value as any)}
+                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white cursor-pointer"
+                      >
+                        <option value="open">Liga Open (14+)</option>
+                        <option value="junior">Liga Junior (6-14)</option>
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">Fecha Inicio</label>
+                        <input
+                          type="date"
+                          value={newSeasonStartDate}
+                          onChange={(e) => setNewSeasonStartDate(e.target.value)}
+                          className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">Fecha Fin</label>
+                        <input
+                          type="date"
+                          value={newSeasonEndDate}
+                          onChange={(e) => setNewSeasonEndDate(e.target.value)}
+                          className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-gray-500 font-bold uppercase">Descripción</label>
+                      <textarea
+                        value={newSeasonDesc}
+                        onChange={(e) => setNewSeasonDesc(e.target.value)}
+                        placeholder="Detalles de clasificación local, regional y nacional..."
+                        rows={3}
+                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          if (!newSeasonName || !newSeasonStartDate || !newSeasonEndDate) {
+                            throw new Error('Por favor completa todos los campos.');
+                          }
+                          await DbService.createSeason({
+                            name: newSeasonName,
+                            country_id: currentUser.country_id || 'UY',
+                            league_type: newSeasonLeague,
+                            start_date: newSeasonStartDate,
+                            end_date: newSeasonEndDate,
+                            description: newSeasonDesc,
+                            status: 'draft'
+                          });
+                          setFeedback('¡Temporada creada como Borrador con éxito!');
+                          setNewSeasonName('');
+                          setNewSeasonStartDate('');
+                          setNewSeasonEndDate('');
+                          setNewSeasonDesc('');
+                          loadData();
+                          setTimeout(() => setFeedback(''), 3000);
+                        } catch (err: any) {
+                          setErrorMsg(err.message || 'Error al crear temporada.');
+                          setTimeout(() => setErrorMsg(''), 4000);
+                        }
+                      }}
+                      className="w-full py-2.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports text-[9px] uppercase tracking-widest rounded-xl transition-all"
+                    >
+                      Crear Temporada
+                    </button>
+                  </div>
+                </div>
+
+                {/* Right: Seasons List */}
+                <div className="lg:col-span-2 space-y-4">
+                  <h3 className="font-extrabold text-xs text-gray-400 uppercase tracking-wider">Historial de Temporadas</h3>
+                  <div className="space-y-3.5 max-h-[500px] overflow-y-auto pr-1 no-scrollbar">
+                    {seasons.filter(s => s.country_id === currentUser.country_id).map((season) => (
+                      <div key={season.id} className="bg-beyblade-card border border-white/5 rounded-2xl p-5 space-y-3">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="font-extrabold text-white text-sm uppercase">{season.name}</h4>
+                            <p className="text-xs text-gray-400">
+                              Rango: {new Date(season.start_date).toLocaleDateString()} al {new Date(season.end_date).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border ${
+                              season.status === 'active' 
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                                : season.status === 'completed'
+                                ? 'bg-beyblade-electricCyan/10 text-beyblade-electricCyan border-beyblade-electricCyan/20'
+                                : 'bg-white/5 text-gray-500 border-white/10'
+                            }`}>
+                              {season.status === 'active' ? 'Activo' : season.status === 'completed' ? 'Finalizado' : 'Borrador'}
+                            </span>
+                            <span className="bg-white/5 border border-white/10 text-gray-400 text-[8px] font-bold px-1.5 py-0.5 rounded">
+                              LIGA {season.league_type.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+
+                        {season.description && (
+                          <p className="text-xs text-gray-400 italic bg-black/20 p-2.5 rounded-xl border border-white/5">
+                            {season.description}
+                          </p>
+                        )}
+
+                        <div className="flex justify-end gap-2 border-t border-white/5 pt-3">
+                          {season.status === 'draft' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await DbService.updateSeasonStatus(season.id!, 'active');
+                                loadData();
+                              }}
+                              className="px-3.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-white font-black font-esports text-[8px] uppercase tracking-widest rounded-lg transition-all"
+                            >
+                              Activar Temporada
+                            </button>
+                          )}
+                          {season.status === 'active' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await DbService.updateSeasonStatus(season.id!, 'completed');
+                                loadData();
+                              }}
+                              className="px-3.5 py-1.5 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed text-white font-black font-esports text-[8px] uppercase tracking-widest rounded-lg transition-all"
+                            >
+                              Finalizar Temporada
+                            </button>
+                          )}
+                          {season.status === 'completed' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await DbService.updateSeasonStatus(season.id!, 'draft');
+                                loadData();
+                              }}
+                              className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-gray-400 font-black font-esports text-[8px] uppercase tracking-widest rounded-lg transition-all"
+                            >
+                              Volver a Borrador
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {seasons.filter(s => s.country_id === currentUser.country_id).length === 0 && (
+                      <p className="text-xs text-gray-500 italic py-6">No hay temporadas registradas para tu país.</p>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -3032,7 +3345,7 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] text-gray-400 font-bold uppercase">Juez Asignado</label>
                   <select
@@ -3043,6 +3356,19 @@ export const AdminDashboard: React.FC = () => {
                     <option value="">Seleccionar Juez Aprobado</option>
                     {judges.filter(j => j.status === 'Aprobado').map(j => (
                       <option key={j.id} value={j.id}>{j.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-bold uppercase">Temporada Oficial</label>
+                  <select
+                    value={newTourSeasonId}
+                    onChange={(e) => setNewTourSeasonId(e.target.value)}
+                    className="w-full bg-beyblade-dark border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white"
+                  >
+                    <option value="">Seleccionar Temporada (Opcional)</option>
+                    {seasons.filter(s => s.status === 'active').map(s => (
+                      <option key={s.id} value={s.id}>{s.name} ({s.league_type.toUpperCase()})</option>
                     ))}
                   </select>
                 </div>
@@ -3091,10 +3417,11 @@ export const AdminDashboard: React.FC = () => {
             <div className="lg:col-span-2">
               {selectedManageTour ? (
                 <div className="bg-beyblade-card border border-white/5 rounded-3xl p-6 space-y-6">
+                  {/* Tournament Title & Actions */}
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
                       <h3 className="font-extrabold text-sm text-white uppercase">{selectedManageTour.name}</h3>
-                      <p className="text-xs text-gray-500">Módulo de Check-in y Registro de Resultados</p>
+                      <p className="text-xs text-gray-500">Módulo de Gestión Competitiva Oficial</p>
                     </div>
                     <div className="flex flex-wrap gap-2 shrink-0">
                       {selectedManageTour.status !== 'finalizado' && (
@@ -3108,6 +3435,113 @@ export const AdminDashboard: React.FC = () => {
                           <Camera className="h-4 w-4" /> Acreditar por QR
                         </button>
                       )}
+                      
+                      {/* Print PDF Button */}
+                      <button
+                        onClick={() => {
+                          const printWindow = window.open('', '_blank');
+                          if (printWindow) {
+                            const pList = manageRegistrations.filter(r => r.checked_in);
+                            const wList = waitlistEntries;
+                            const bMatches = bracketMatches;
+                            const resultsText = selectedManageTour.status === 'finalizado' ? `
+                              <div style="margin-top: 20px;">
+                                <h3>Resultados Finales:</h3>
+                                <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                                  <thead>
+                                    <tr style="border-bottom: 2px solid #333; text-align: left;">
+                                      <th style="padding: 8px;">Posición</th>
+                                      <th style="padding: 8px;">Jugador</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    ${pList.map((p, idx) => `
+                                      <tr style="border-bottom: 1px solid #eee;">
+                                        <td style="padding: 8px; font-weight: bold;">${idx + 1}º</td>
+                                        <td style="padding: 8px;">${p.player_name}</td>
+                                      </tr>
+                                    `).join('')}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ` : '';
+
+                            const bracketsText = bMatches.length > 0 ? `
+                              <div style="margin-top: 20px;">
+                                <h3>Llave de Brackets (Enfrentamientos):</h3>
+                                <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
+                                  ${bMatches.map(m => `
+                                    <div style="border: 1px solid #ccc; padding: 10px; border-radius: 8px; background: #fafafa;">
+                                      <strong>Ronda ${m.round_number} - Combate ${m.match_number + 1}</strong><br/>
+                                      ${m.player1_name || 'Pendiente'} (${m.player1_score}) vs 
+                                      ${m.player2_name ? `${m.player2_name} (${m.player2_score})` : m.bye_assigned ? 'BYE (Pase directo)' : 'Pendiente'}
+                                      ${m.winner_name ? `<br/><span style="color: green; font-weight: bold;">Ganador: ${m.winner_name}</span>` : ''}
+                                    </div>
+                                  `).join('')}
+                                </div>
+                              </div>
+                            ` : '';
+
+                            const waitlistText = wList.length > 0 ? `
+                              <div style="margin-top: 20px;">
+                                <h3>Lista de Espera (${wList.length} Jugadores):</h3>
+                                <ul style="list-style-type: decimal; padding-left: 20px; margin-top: 10px;">
+                                  ${wList.map(w => `<li>${w.player_name} (Posición ${w.position})</li>`).join('')}
+                                </ul>
+                              </div>
+                            ` : '';
+
+                            printWindow.document.write(`
+                              <html>
+                                <head>
+                                  <title>Reporte de Torneo: ${selectedManageTour.name}</title>
+                                  <style>
+                                    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #222; margin: 40px; line-height: 1.5; }
+                                    h1 { border-bottom: 2px solid #00F0FF; padding-bottom: 10px; font-size: 24px; text-transform: uppercase; color: #111; }
+                                    .meta-info { margin-top: 10px; font-size: 13px; color: #555; background: #f0fdfa; border: 1px solid #99f6e4; padding: 12px; border-radius: 8px; }
+                                    h3 { font-size: 16px; text-transform: uppercase; margin-bottom: 5px; color: #0f766e; margin-top: 30px; border-bottom: 1px solid #ddd; padding-bottom: 5px;}
+                                    @media print {
+                                      body { margin: 20px; font-size: 12px; }
+                                    }
+                                  </style>
+                                </head>
+                                <body>
+                                  <h1>Reporte Oficial de Competencia</h1>
+                                  <div class="meta-info">
+                                    <strong>Torneo:</strong> ${selectedManageTour.name}<br/>
+                                    <strong>Organizador:</strong> ${selectedManageTour.organizer_name}<br/>
+                                    <strong>Fecha/Hora:</strong> ${selectedManageTour.date} a las ${selectedManageTour.time}<br/>
+                                    <strong>Ubicación:</strong> ${selectedManageTour.address}, ${selectedManageTour.locality}<br/>
+                                    <strong>Formato:</strong> ${selectedManageTour.format}<br/>
+                                    <strong>Estado:</strong> ${selectedManageTour.status.toUpperCase()}
+                                  </div>
+                                  
+                                  <h3>Acreditados (${pList.length} Jugadores):</h3>
+                                  <ul style="list-style-type: decimal; padding-left: 20px; margin-top: 10px;">
+                                    ${pList.map(p => `<li>${p.player_name}</li>`).join('')}
+                                  </ul>
+
+                                  ${waitlistText}
+                                  ${resultsText}
+                                  ${bracketsText}
+
+                                  <div style="margin-top: 50px; text-align: center; font-size: 11px; color: #888; border-top: 1px solid #eee; padding-top: 15px;">
+                                    Generado automáticamente por la Plataforma Oficial Beyblade Uruguay / LATAM. Let it Rip!
+                                  </div>
+                                  <script>
+                                    window.onload = function() { window.print(); }
+                                  </script>
+                                </body>
+                              </html>
+                            `);
+                            printWindow.document.close();
+                          }
+                        }}
+                        className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-bold text-xs uppercase rounded-xl transition-all flex items-center gap-1.5"
+                      >
+                        <Printer className="h-4 w-4" /> Imprimir Reporte
+                      </button>
+
                       <button
                         onClick={() => handleDeleteTournament(selectedManageTour.id)}
                         className="px-4 py-2.5 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed/20 border border-beyblade-electricRed/30 text-beyblade-electricRed font-bold text-xs uppercase rounded-xl transition-all flex items-center gap-1.5"
@@ -3218,57 +3652,375 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Registrants list with Check-In checkboxes */}
-                  <div className="space-y-4">
-                    <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5"><CheckSquare className="h-4 w-4" /> Check-in de Jugadores</h4>
-                    <div className="divide-y divide-white/5 bg-beyblade-dark rounded-xl border border-white/5 overflow-hidden">
-                      {manageRegistrations.map((r) => (
-                        <div key={r.id} className="p-3 flex items-center justify-between text-xs">
-                          <span className="font-bold text-white">{r.player_name}</span>
-                          <label className="flex items-center gap-2 cursor-pointer select-none text-gray-400">
-                            <input
-                              type="checkbox"
-                              checked={r.checked_in}
-                              onChange={(e) => handleCheckInToggle(r.id, e.target.checked)}
-                              className="rounded border-white/10 text-beyblade-electricCyan bg-beyblade-darker focus:ring-0"
-                            />
-                            Presente
-                          </label>
-                        </div>
-                      ))}
-                    </div>
+                  {/* Sub-tab selection within tournament details */}
+                  <div className="flex border-b border-white/5 pb-2">
+                    <button
+                      type="button"
+                      onClick={() => setOrganizerTournamentsTab('acreditacion')}
+                      className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                        organizerTournamentsTab === 'acreditacion'
+                          ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                          : 'border-transparent text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Users className="h-4 w-4" /> Acreditación e Inscripción
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrganizerTournamentsTab('brackets')}
+                      className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                        organizerTournamentsTab === 'brackets'
+                          ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                          : 'border-transparent text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Trophy className="h-4 w-4" /> Fase Eliminatoria (Brackets)
+                      </span>
+                    </button>
                   </div>
 
-                  {/* Placements entries */}
-                  {selectedManageTour.status !== 'finalizado' && (
-                    <div className="space-y-4 pt-2">
-                      <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5"><Trophy className="h-4 w-4" /> Cargar Resultados del Torneo</h4>
-                      <p className="text-[10px] text-gray-500">Especifica el puesto obtenido por cada jugador presente. (1º, 2º, 3º, 4º sumarán puntos específicos. 5º+ sumará 1 punto por asistencia).</p>
-                      
-                      <div className="space-y-2 bg-beyblade-dark rounded-xl border border-white/5 p-4">
-                        {manageRegistrations.filter(r => r.checked_in).map(r => (
-                          <div key={r.id} className="flex justify-between items-center text-xs">
-                            <span className="text-white font-bold">{r.player_name}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] text-gray-500 font-bold uppercase">Puesto:</span>
-                              <input
-                                type="number"
-                                min="1"
-                                value={placements[r.player_id] || ''}
-                                onChange={(e) => setPlacements({ ...placements, [r.player_id]: Number(e.target.value) })}
-                                className="w-16 bg-beyblade-darker border border-white/10 rounded-lg px-2 py-1 text-center font-bold text-white"
-                              />
+                  {/* Sub-tab 1: Acreditacion e Inscripcion */}
+                  {organizerTournamentsTab === 'acreditacion' && (
+                    <div className="space-y-6 animate-fade-in text-left">
+                      {/* Attendance Confirmations list */}
+                      <div className="space-y-3">
+                        <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5">
+                          <CheckSquare className="h-4 w-4 text-beyblade-electricCyan" /> Confirmación de Asistencia (48hs Antes)
+                        </h4>
+                        <p className="text-[10px] text-gray-500">
+                          Revisa la lista de confirmados y gestiona cancelaciones. Si un jugador declina asistencia, se liberará su plaza para la lista de espera.
+                        </p>
+                        <div className="divide-y divide-white/5 bg-beyblade-dark rounded-xl border border-white/5 overflow-hidden text-xs max-h-48 overflow-y-auto no-scrollbar">
+                          {attendanceConfirmations.map((a) => (
+                            <div key={a.id} className="p-3 flex items-center justify-between">
+                              <div>
+                                <span className="font-bold text-white block">{a.player_name}</span>
+                                <span className={`text-[8.5px] font-black uppercase ${
+                                  a.confirmed === true ? 'text-emerald-400' :
+                                  a.confirmed === false ? 'text-beyblade-electricRed' : 'text-gray-500'
+                                }`}>
+                                  {a.confirmed === true ? 'Asistencia Confirmada' :
+                                   a.confirmed === false ? 'Cancelado / Liberado' : 'Pendiente de Respuesta'}
+                                </span>
+                              </div>
+                              {a.confirmed !== false && (
+                                <div className="flex gap-2">
+                                  {a.confirmed !== true && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateAttendanceConfirmation(a.player_id, true)}
+                                      className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white font-bold text-[9px] uppercase rounded transition-all"
+                                    >
+                                      Confirmar
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateAttendanceConfirmation(a.player_id, false)}
+                                    className="px-2.5 py-1 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed text-beyblade-electricRed hover:text-white font-bold text-[9px] uppercase rounded transition-all"
+                                  >
+                                    Declinar / Liberar
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                          {attendanceConfirmations.length === 0 && (
+                            <p className="text-[10px] text-gray-500 italic p-3 text-center">No hay confirmaciones de asistencia pendientes en este torneo.</p>
+                          )}
+                        </div>
                       </div>
 
-                      <button
-                        onClick={handleSavePlacements}
-                        className="w-full py-3 bg-beyblade-electricRed text-white font-extrabold text-xs uppercase rounded-xl shadow-neon-red hover:bg-beyblade-electricRed/80 transition-all"
-                      >
-                        Enviar Posiciones al Distribuidor
-                      </button>
+                      {/* Waitlist list */}
+                      <div className="space-y-3">
+                        <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5">
+                          <List className="h-4 w-4 text-beyblade-gold" /> Lista de Espera (Waitlist)
+                        </h4>
+                        <div className="divide-y divide-white/5 bg-beyblade-dark rounded-xl border border-white/5 overflow-hidden text-xs max-h-48 overflow-y-auto no-scrollbar">
+                          {waitlistEntries.map((w) => (
+                            <div key={w.id} className="p-3 flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="bg-white/5 px-2 py-0.5 rounded text-[10px] font-mono font-bold text-gray-400">#{w.position}</span>
+                                <span className="font-bold text-white">{w.player_name}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (window.confirm(`¿Seguro que deseas remover a ${w.player_name} de la lista de espera?`)) {
+                                    await DbService.leaveWaitlist(selectedManageTour.id, w.player_id);
+                                    await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+                                  }
+                                }}
+                                className="px-2 py-1 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed text-white font-bold text-[9px] uppercase rounded transition-all"
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          ))}
+                          {waitlistEntries.length === 0 && (
+                            <p className="text-[10px] text-gray-500 italic p-3 text-center">La lista de espera está vacía.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Checked In Present Players list */}
+                      <div className="space-y-3">
+                        <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5">
+                          <CheckSquare className="h-4 w-4 text-emerald-400" /> Acreditación de Jugadores (Checked-in)
+                        </h4>
+                        <div className="divide-y divide-white/5 bg-beyblade-dark rounded-xl border border-white/5 overflow-hidden max-h-60 overflow-y-auto no-scrollbar">
+                          {manageRegistrations.map((r) => (
+                            <div key={r.id} className="p-3 flex items-center justify-between text-xs">
+                              <span className="font-bold text-white">{r.player_name}</span>
+                              <label className="flex items-center gap-2 cursor-pointer select-none text-gray-400">
+                                <input
+                                  type="checkbox"
+                                  checked={r.checked_in}
+                                  onChange={(e) => handleCheckInToggle(r.id, e.target.checked)}
+                                  className="rounded border-white/10 text-beyblade-electricCyan bg-beyblade-darker focus:ring-0"
+                                />
+                                Presente / Acreditado
+                              </label>
+                            </div>
+                          ))}
+                          {manageRegistrations.length === 0 && (
+                            <p className="text-[10px] text-gray-500 italic p-3 text-center">No hay jugadores inscriptos en este torneo.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sub-tab 2: Brackets / Eliminatoria */}
+                  {organizerTournamentsTab === 'brackets' && (
+                    <div className="space-y-6 animate-fade-in text-left">
+                      {bracketLoading ? (
+                        <div className="text-center py-12 space-y-3">
+                          <Loader2 className="h-8 w-8 text-beyblade-electricCyan animate-spin mx-auto" />
+                          <p className="text-xs text-gray-400 font-bold">Procesando estructura eliminatoria...</p>
+                        </div>
+                      ) : activeBracket ? (
+                        <div className="space-y-6">
+                          {/* Active Bracket Details */}
+                          <div className="flex justify-between items-center bg-beyblade-dark/60 p-4 border border-white/5 rounded-2xl">
+                            <div>
+                              <span className="text-[9px] text-emerald-400 font-bold uppercase block">Fase Eliminatoria Activa</span>
+                              <h4 className="text-xs font-black text-white uppercase tracking-wider font-esports">Bracket de Eliminación Simple</h4>
+                            </div>
+                            <span className="text-[10px] text-gray-400 font-mono">Bracket ID: {activeBracket.id?.substring(0, 8)}</span>
+                          </div>
+
+                          {/* Bracket Matches Visual Tree Map */}
+                          <div className="overflow-x-auto pb-4 no-scrollbar">
+                            <div className="flex gap-8 min-w-[650px] items-stretch justify-start pt-2">
+                              {(() => {
+                                // Group matches by round
+                                const roundsMap: { [round: number]: BracketMatch[] } = {};
+                                bracketMatches.forEach(m => {
+                                  if (!roundsMap[m.round_number]) roundsMap[m.round_number] = [];
+                                  roundsMap[m.round_number].push(m);
+                                });
+
+                                const roundNumbers = Object.keys(roundsMap).map(Number).sort((a, b) => a - b);
+                                
+                                return roundNumbers.map((roundNum) => {
+                                  const matchesInRound = roundsMap[roundNum];
+                                  
+                                  // Formatting round name
+                                  let roundName = `Ronda ${roundNum}`;
+                                  if (roundNum === roundNumbers.length) roundName = 'Gran Final';
+                                  else if (roundNum === roundNumbers.length - 1) roundName = 'Semifinal';
+                                  else if (roundNum === roundNumbers.length - 2) roundName = 'Cuartos de Final';
+                                  else if (roundNum === roundNumbers.length - 3) roundName = 'Octavos de Final';
+
+                                  return (
+                                    <div key={roundNum} className="flex-1 flex flex-col justify-around gap-4 min-w-[200px]">
+                                      <div className="text-center pb-2 border-b border-white/5">
+                                        <span className="text-[9px] font-black uppercase text-beyblade-electricCyan font-esports tracking-widest">{roundName}</span>
+                                      </div>
+                                      
+                                      <div className="flex flex-col justify-around h-full gap-4">
+                                        {matchesInRound.map((m) => {
+                                          const isCompleted = m.status === 'completed';
+                                          const isSelected = selectedMatchForScore?.id === m.id;
+
+                                          return (
+                                            <div
+                                              key={m.id}
+                                              className={`bg-beyblade-darker/60 border rounded-2xl p-3 text-xs space-y-2 transition-all relative ${
+                                                isCompleted 
+                                                  ? 'border-white/5 opacity-80' 
+                                                  : isSelected
+                                                  ? 'border-beyblade-electricCyan ring-1 ring-beyblade-electricCyan'
+                                                  : 'border-beyblade-electricCyan/25 hover:border-beyblade-electricCyan/50 cursor-pointer'
+                                              }`}
+                                              onClick={() => {
+                                                if (!isCompleted && !m.bye_assigned && (m.player1_id || m.player2_id)) {
+                                                  setSelectedMatchForScore(m);
+                                                  setScoreP1(m.player1_score || 0);
+                                                  setScoreP2(m.player2_score || 0);
+                                                }
+                                              }}
+                                            >
+                                              {/* Player 1 Card slot */}
+                                              <div className="flex justify-between items-center">
+                                                <span className={`font-bold truncate max-w-[120px] ${
+                                                  isCompleted && m.winner_id === m.player1_id ? 'text-beyblade-electricCyan' : 'text-white'
+                                                }`}>
+                                                  {m.player1_name || 'Pendiente'}
+                                                </span>
+                                                <span className="font-mono font-black text-white">{m.player1_score}</span>
+                                              </div>
+
+                                              {/* Vs separator line */}
+                                              <div className="h-[1px] bg-white/5 w-full"></div>
+
+                                              {/* Player 2 Card slot */}
+                                              <div className="flex justify-between items-center">
+                                                {m.bye_assigned ? (
+                                                  <span className="text-emerald-400/80 font-black uppercase text-[8px] font-esports tracking-wide">
+                                                    [ BYE / Pase Directo ]
+                                                  </span>
+                                                ) : (
+                                                  <span className={`font-bold truncate max-w-[120px] ${
+                                                    isCompleted && m.winner_id === m.player2_id ? 'text-beyblade-electricCyan' : 'text-white'
+                                                  }`}>
+                                                    {m.player2_name || 'Pendiente'}
+                                                  </span>
+                                                )}
+                                                <span className="font-mono font-black text-white">
+                                                  {m.bye_assigned ? '-' : m.player2_score}
+                                                </span>
+                                              </div>
+
+                                              {/* Winner Badge */}
+                                              {isCompleted && m.winner_name && (
+                                                <div className="text-[8px] font-black uppercase text-emerald-400 font-esports pt-1 flex items-center gap-0.5">
+                                                  <Check className="h-3 w-3" /> Ganó {m.winner_name.split(' ')[0]}
+                                                </div>
+                                              )}
+
+                                              {/* Inline score editor */}
+                                              {isSelected && (
+                                                <div className="bg-beyblade-dark p-3.5 rounded-xl border border-white/5 space-y-2 mt-2" onClick={(e) => e.stopPropagation()}>
+                                                  <h5 className="text-[9px] font-black uppercase text-beyblade-electricCyan tracking-wider font-esports">Registrar Resultado</h5>
+                                                  <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                                                    <div>
+                                                      <span className="text-[8px] text-gray-500 font-bold uppercase truncate block max-w-[80px]">{m.player1_name?.split(' ')[0]}</span>
+                                                      <input
+                                                        type="number"
+                                                        value={scoreP1}
+                                                        onChange={(e) => setScoreP1(Number(e.target.value))}
+                                                        className="w-12 bg-beyblade-darker border border-white/10 rounded px-1.5 py-1 text-center font-bold text-white mt-1"
+                                                      />
+                                                    </div>
+                                                    <div>
+                                                      <span className="text-[8px] text-gray-500 font-bold uppercase truncate block max-w-[80px]">{m.player2_name?.split(' ')[0]}</span>
+                                                      <input
+                                                        type="number"
+                                                        value={scoreP2}
+                                                        onChange={(e) => setScoreP2(Number(e.target.value))}
+                                                        className="w-12 bg-beyblade-darker border border-white/10 rounded px-1.5 py-1 text-center font-bold text-white mt-1"
+                                                      />
+                                                    </div>
+                                                  </div>
+                                                  <div className="flex gap-1.5 pt-1">
+                                                    <button
+                                                      type="button"
+                                                      onClick={async () => {
+                                                        const winId = scoreP1 > scoreP2 ? m.player1_id : m.player2_id;
+                                                        if (winId) {
+                                                          await handleSubmitBracketScore(m.id!, winId, scoreP1, scoreP2);
+                                                        } else {
+                                                          setErrorMsg('No se puede determinar un ganador. Empate no permitido.');
+                                                        }
+                                                      }}
+                                                      className="flex-1 py-1.5 bg-beyblade-electricCyan text-beyblade-darker font-black font-esports text-[8.5px] uppercase tracking-wider rounded"
+                                                    >
+                                                      Guardar
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => setSelectedMatchForScore(null)}
+                                                      className="px-2 py-1.5 bg-white/5 text-gray-400 font-bold text-[8.5px] uppercase rounded"
+                                                    >
+                                                      X
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                });
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                          {/* Warning / Call to Action */}
+                          <div className="bg-beyblade-dark border border-white/5 rounded-3xl p-6 space-y-4 text-center">
+                            <Trophy className="h-10 w-10 text-beyblade-electricCyan mx-auto animate-pulse" />
+                            <h4 className="font-extrabold text-white text-sm uppercase">Llave de Brackets Eliminatorios sin Generar</h4>
+                            <p className="text-xs text-gray-400 max-w-md mx-auto leading-relaxed">
+                              Acredita a los jugadores presentes en la pestaña **"Acreditación e Inscripción"**. Una vez listos todos los checked-in, presiona el botón para realizar el sorteo automático de BYEs y generar el bracket eliminatorio oficial.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={handleGenerateBracket}
+                              className="px-6 py-2.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports text-[10px] uppercase tracking-widest rounded-xl transition-all shadow-neon-cyan"
+                            >
+                              Generar Brackets y Sorteo BYEs
+                            </button>
+                          </div>
+
+                          {/* Fallback Legacy Manual Placements input */}
+                          <div className="border-t border-white/5 pt-6 space-y-4">
+                            <div className="flex flex-col gap-1">
+                              <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5">
+                                <Settings className="h-4 w-4" /> Fallback: Carga Manual de Resultados (Legacy)
+                              </h4>
+                              <p className="text-[10px] text-gray-500">
+                                Utiliza esta sección si prefieres registrar las posiciones finales manualmente en lugar de generar un bracket interactivo.
+                              </p>
+                            </div>
+                            
+                            <div className="space-y-2 bg-beyblade-dark rounded-xl border border-white/5 p-4">
+                              {manageRegistrations.filter(r => r.checked_in).map(r => (
+                                <div key={r.id} className="flex justify-between items-center text-xs">
+                                  <span className="text-white font-bold">{r.player_name}</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-gray-500 font-bold uppercase">Puesto:</span>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      value={placements[r.player_id] || ''}
+                                      onChange={(e) => setPlacements({ ...placements, [r.player_id]: Number(e.target.value) })}
+                                      className="w-16 bg-beyblade-darker border border-white/10 rounded-lg px-2 py-1 text-center font-bold text-white"
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={handleSavePlacements}
+                              className="w-full py-3 bg-beyblade-electricRed text-white font-extrabold text-xs uppercase rounded-xl shadow-neon-red hover:bg-beyblade-electricRed/80 transition-all"
+                            >
+                              Enviar Posiciones al Distribuidor
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
                     </div>
                   )}
 
