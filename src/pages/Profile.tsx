@@ -61,10 +61,10 @@ export const Profile: React.FC = () => {
 
         // Fetch tournament results history
         const allTournaments = await DbService.getTournamentsList();
-        const results = await DbService.getTournamentResults(''); // Hack to get mock results in DbService
+        const results = await DbService.getPlayerResults(p.id);
         
         // Filter results for this player
-        const playerResults = results.filter(r => r.player_id === p.id && r.validated_by_distributor);
+        const playerResults = results.filter(r => r.validated_by_distributor);
         
         const historyDetails = playerResults.map(res => {
           const tour = allTournaments.find(t => t.id === res.tournament_id);

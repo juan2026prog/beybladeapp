@@ -611,6 +611,25 @@ export class DbService {
     }));
   }
 
+  public static async getPlayerResults(playerId: string): Promise<TournamentResult[]> {
+    const { data, error } = await supabase
+      .from('tournament_results')
+      .select('*, players(first_name, last_name)')
+      .eq('player_id', playerId);
+      
+    if (error) throw error;
+
+    return (data || []).map(r => ({
+      id: r.id.toString(),
+      tournament_id: r.tournament_id,
+      player_id: r.player_id,
+      position: r.position,
+      points_awarded: r.points_awarded,
+      validated_by_distributor: r.validated_by_distributor,
+      player_name: r.players ? `${(r.players as any).first_name} ${(r.players as any).last_name}` : 'Jugador'
+    }));
+  }
+
   public static async getPendingValidationResults(): Promise<Tournament[]> {
     const { data, error } = await supabase
       .from('tournament_results')
