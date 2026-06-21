@@ -156,26 +156,7 @@ export const Products: React.FC = () => {
     });
   }, [products, searchQuery, selectedType, selectedStatus, selectedCategory, selectedLine]);
 
-  // Spotlight Product
-  const spotlightProduct = useMemo(() => {
-    if (products.length === 0) return null;
-    const prefered = products.find(
-      p => ((p.product_type || p.type) === 'starter' || (p.product_type || p.type) === 'booster') && p.status === 'disponible'
-    );
-    return prefered || products[0];
-  }, [products]);
 
-  const spotlightCategory = useMemo(() => {
-    if (!spotlightProduct) return 'Equilibrio';
-    if (spotlightProduct.product_category) {
-      const cat = spotlightProduct.product_category.toLowerCase();
-      if (cat.includes('ataque')) return 'Ataque';
-      if (cat.includes('defensa')) return 'Defensa';
-      if (cat.includes('resistencia')) return 'Resistencia';
-      return 'Equilibrio';
-    }
-    return getBeybladeStats(spotlightProduct.name).type;
-  }, [spotlightProduct]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -203,95 +184,7 @@ export const Products: React.FC = () => {
         <p className="text-xs text-gray-400">Gama oficial de Beyblade X distribuida por Hasbro. Telemetría de combate y especificaciones técnicas oficiales.</p>
       </div>
 
-      {/* 1. Spotlight Product */}
-      {spotlightProduct && (
-        <motion.section 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="relative bg-[#080E18] border border-white/10 rounded-3xl overflow-hidden clip-cyber-card shadow-lg"
-        >
-          {/* Tech grid backgrounds */}
-          <div className="absolute inset-0 tech-grid opacity-30 z-0"></div>
-          <div className="absolute top-0 right-0 w-80 h-80 bg-beyblade-electricCyan/5 rounded-full filter blur-[80px] pointer-events-none z-0"></div>
-          <div className="absolute bottom-0 left-0 w-80 h-80 bg-beyblade-electricRed/5 rounded-full filter blur-[80px] pointer-events-none z-0"></div>
 
-          <div className="relative grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 md:p-8 z-10 items-center">
-            
-            {/* Info details */}
-            <div className="lg:col-span-7 space-y-5">
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-2 items-center">
-                  <span className="text-[9px] font-black uppercase tracking-widest bg-beyblade-electricCyan/15 text-beyblade-electricCyan border border-beyblade-electricCyan/30 px-3 py-1 rounded-md font-esports">
-                    Beyblade Destacado
-                  </span>
-                  {spotlightProduct.sku && (
-                    <span className="text-[9px] font-black uppercase tracking-widest bg-black/40 text-beyblade-electricCyan border border-beyblade-electricCyan/20 px-3 py-1 rounded-md font-mono">
-                      SKU: {spotlightProduct.sku}
-                    </span>
-                  )}
-                  <span className={`text-[9px] font-black px-3 py-1 rounded-md uppercase border font-esports tracking-wider ${getStatusBadge(spotlightProduct.status)}`}>
-                    {spotlightProduct.status}
-                  </span>
-                </div>
-
-                <h2 className="text-3xl md:text-4xl font-black text-white uppercase tracking-wide font-title leading-tight">
-                  {spotlightProduct.name}
-                </h2>
-                
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-xs text-gray-400 font-extrabold uppercase font-esports tracking-widest">{spotlightProduct.line}</span>
-                  <span className="text-gray-600">•</span>
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-black uppercase font-esports tracking-wider ${getCombatTypeDetails(spotlightCategory).badgeClass}`}>
-                    {getCombatTypeDetails(spotlightCategory).icon}
-                    {getCombatTypeDetails(spotlightCategory).label}
-                  </span>
-                </div>
-              </div>
-
-              <p className="text-xs text-gray-300 leading-relaxed font-sans max-w-xl">
-                {spotlightProduct.short_description || spotlightProduct.description}
-              </p>
-
-              <div className="pt-2 flex flex-wrap gap-3">
-                <Link
-                  to={`/products/${spotlightProduct.id}`}
-                  className="px-6 py-3 bg-beyblade-electricCyan text-beyblade-darker font-black font-esports text-xs uppercase tracking-widest rounded-xl hover:bg-white hover:shadow-neon-cyan transition-all duration-300 flex items-center gap-2 group"
-                >
-                  Ver Ficha Completa
-                </Link>
-                <button
-                  onClick={() => handleWhereToBuy(spotlightProduct.id)}
-                  className="px-6 py-3 bg-white/5 border border-white/10 hover:border-beyblade-electricCyan/35 text-white hover:text-beyblade-electricCyan font-black font-esports text-xs uppercase tracking-widest rounded-xl transition-all duration-300 flex items-center gap-2"
-                >
-                  <MapPin className="h-4 w-4" /> Dónde comprar en Uruguay
-                </button>
-              </div>
-            </div>
-
-            {/* Float holographic image */}
-            <div className="lg:col-span-5 flex justify-center py-4">
-              <div className="relative w-64 h-64 flex items-center justify-center">
-                <div className="absolute inset-0 border border-dashed border-beyblade-electricCyan/20 rounded-full animate-orbit-cw"></div>
-                <div className="absolute inset-4 border border-dashed border-beyblade-electricRed/15 rounded-full animate-orbit-ccw"></div>
-                
-                <div className="w-48 h-48 rounded-full bg-gradient-to-tr from-beyblade-electricCyan/10 to-beyblade-electricRed/10 backdrop-blur-sm border border-white/5 flex items-center justify-center shadow-[0_0_30px_rgba(0,240,255,0.1)] overflow-hidden p-2">
-                  {spotlightProduct.main_image_url || spotlightProduct.image_url ? (
-                    <img 
-                      src={spotlightProduct.main_image_url || spotlightProduct.image_url} 
-                      className="w-full h-full object-contain animate-float-p1" 
-                      alt={spotlightProduct.name} 
-                    />
-                  ) : (
-                    <ShoppingBag className="h-10 w-10 text-gray-500" />
-                  )}
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </motion.section>
-      )}
 
       {/* 2. Advanced Filters */}
       <div className="bg-beyblade-card border border-white/5 rounded-3xl p-5 space-y-4 shadow-lg">
