@@ -3,7 +3,7 @@ import {
   Shield, Check, X, ToggleLeft, ToggleRight, Plus, 
   Trophy, Settings, CheckSquare, Camera,
   TrendingUp, BarChart2, Flag, Package, Map, Users,
-  ShoppingBag, MapPin, AlertCircle, Film
+  ShoppingBag, MapPin, AlertCircle, Film, Trash2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabaseClient';
@@ -620,6 +620,22 @@ export const AdminDashboard: React.FC = () => {
       loadData();
     } catch (err: any) {
       setErrorMsg(err.message || 'Error al crear torneo.');
+    }
+  };
+
+  const handleDeleteTournament = async (tournamentId: string) => {
+    if (!window.confirm('¿Estás seguro de que deseas eliminar este torneo permanentemente? Esta acción no se puede deshacer.')) {
+      return;
+    }
+    try {
+      setErrorMsg('');
+      setFeedback('');
+      await DbService.deleteTournament(tournamentId);
+      setFeedback('Torneo eliminado correctamente.');
+      setSelectedManageTour(null);
+      loadData();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al eliminar torneo.');
     }
   };
 
@@ -3080,17 +3096,25 @@ export const AdminDashboard: React.FC = () => {
                       <h3 className="font-extrabold text-sm text-white uppercase">{selectedManageTour.name}</h3>
                       <p className="text-xs text-gray-500">Módulo de Check-in y Registro de Resultados</p>
                     </div>
-                    {selectedManageTour.status !== 'finalizado' && (
+                    <div className="flex flex-wrap gap-2 shrink-0">
+                      {selectedManageTour.status !== 'finalizado' && (
+                        <button
+                          onClick={() => {
+                            setIsScanningQR(true);
+                            setScanResult(null);
+                          }}
+                          className="px-4 py-2.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/80 text-beyblade-darker font-bold text-xs uppercase rounded-xl transition-all flex items-center gap-1.5 shadow-neon-cyan"
+                        >
+                          <Camera className="h-4 w-4" /> Acreditar por QR
+                        </button>
+                      )}
                       <button
-                        onClick={() => {
-                          setIsScanningQR(true);
-                          setScanResult(null);
-                        }}
-                        className="px-4 py-2.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/80 text-beyblade-darker font-bold text-xs uppercase rounded-xl transition-all flex items-center gap-1.5 shadow-neon-cyan shrink-0"
+                        onClick={() => handleDeleteTournament(selectedManageTour.id)}
+                        className="px-4 py-2.5 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed/20 border border-beyblade-electricRed/30 text-beyblade-electricRed font-bold text-xs uppercase rounded-xl transition-all flex items-center gap-1.5"
                       >
-                        <Camera className="h-4 w-4" /> Acreditar por QR
+                        <Trash2 className="h-4 w-4" /> Eliminar Torneo
                       </button>
-                    )}
+                    </div>
                   </div>
 
                   {isScanningQR && (

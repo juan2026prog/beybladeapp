@@ -599,6 +599,11 @@ export class DbService {
     if (error) throw error;
   }
 
+  public static async deleteTournament(id: string): Promise<void> {
+    const { error } = await supabase.from('tournaments').delete().eq('id', id);
+    if (error) throw error;
+  }
+
   // CALL ATOMIC CONCURRENCY RPC FOR TOURNAMENT REGISTRATION
   public static async registerForTournament(tournamentId: string, playerId: string, _playerName: string): Promise<void> {
     const { error } = await supabase.rpc('register_player_to_tournament', {
