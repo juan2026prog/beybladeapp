@@ -64,7 +64,14 @@ export const Tournaments: React.FC = () => {
 
         let roleVal = 'Visitante';
         if (profile) {
-          switch (profile.role) {
+          let role = profile.role;
+          if (profile.role === 'super_admin') {
+            const viewMode = sessionStorage.getItem('admin_view_mode');
+            if (viewMode && viewMode !== 'super_admin') {
+              role = viewMode;
+            }
+          }
+          switch (role) {
             case 'super_admin': roleVal = 'Super Admin'; break;
             case 'country_admin': roleVal = 'Distribuidor País'; break;
             case 'organizer': roleVal = 'Organizador'; break;

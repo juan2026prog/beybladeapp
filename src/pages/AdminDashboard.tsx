@@ -257,8 +257,17 @@ export const AdminDashboard: React.FC = () => {
         .maybeSingle();
 
       if (profile) {
+        let role = profile.role;
+        // Intercept role if user is super_admin and view mode is active
+        if (profile.role === 'super_admin') {
+          const viewMode = sessionStorage.getItem('admin_view_mode');
+          if (viewMode && viewMode !== 'super_admin') {
+            role = viewMode;
+          }
+        }
+
         let mappedRole = 'Visitante';
-        switch (profile.role) {
+        switch (role) {
           case 'super_admin': mappedRole = 'Super Admin'; break;
           case 'country_admin': mappedRole = 'Distribuidor País'; break;
           case 'organizer': mappedRole = 'Organizador'; break;
@@ -271,6 +280,7 @@ export const AdminDashboard: React.FC = () => {
         userProfile = {
           id: session.user.id,
           role: mappedRole,
+          realRole: profile.role,
           email: session.user.email || '',
           country_id: (profile as any).country_id || 'UY'
         };
@@ -725,6 +735,84 @@ export const AdminDashboard: React.FC = () => {
       {/* ========================================================================= */}
       {currentUser.role === 'Super Admin' && (
         <div className="space-y-8">
+          {/* Impersonation Mode Control */}
+          <div className="bg-gradient-to-br from-beyblade-card to-beyblade-darker border border-beyblade-electricCyan/30 rounded-3xl p-6 relative overflow-hidden clip-cyber-card shadow-lg">
+            <div className="absolute inset-0 tech-grid opacity-5 pointer-events-none"></div>
+            <div className="absolute -top-24 -right-24 w-48 h-48 bg-beyblade-electricCyan/5 rounded-full blur-2xl pointer-events-none"></div>
+            
+            <div className="relative z-10 space-y-4">
+              <div className="flex items-center gap-2">
+                <Shield className="h-5 w-5 text-beyblade-electricCyan text-glow-cyan" />
+                <h3 className="font-title text-base text-white uppercase tracking-wider">Fase Super Admin — Modo "Ver como" / Impersonación</h3>
+              </div>
+              
+              <p className="text-xs text-gray-300 max-w-2xl leading-relaxed font-semibold">
+                Prueba la interfaz de la plataforma bajo los diferentes perfiles. Este modo solo cambia la navegación y renderizado visual; tus permisos reales en Supabase no se alteran.
+              </p>
+              
+              <div className="flex flex-wrap gap-2.5 pt-2">
+                <button
+                  onClick={() => {
+                    sessionStorage.setItem('admin_view_mode', 'player');
+                    window.location.reload();
+                  }}
+                  className="px-4 py-2.5 bg-beyblade-darker hover:bg-beyblade-electricCyan hover:text-beyblade-darker border border-white/10 hover:border-beyblade-electricCyan rounded-xl text-xs font-black font-esports uppercase tracking-widest transition-all duration-300"
+                >
+                  Probar como Jugador
+                </button>
+                <button
+                  onClick={() => {
+                    sessionStorage.setItem('admin_view_mode', 'organizer');
+                    window.location.reload();
+                  }}
+                  className="px-4 py-2.5 bg-beyblade-darker hover:bg-beyblade-electricCyan hover:text-beyblade-darker border border-white/10 hover:border-beyblade-electricCyan rounded-xl text-xs font-black font-esports uppercase tracking-widest transition-all duration-300"
+                >
+                  Probar como Organizador
+                </button>
+                <button
+                  onClick={() => {
+                    sessionStorage.setItem('admin_view_mode', 'store');
+                    window.location.reload();
+                  }}
+                  className="px-4 py-2.5 bg-beyblade-darker hover:bg-beyblade-electricCyan hover:text-beyblade-darker border border-white/10 hover:border-beyblade-electricCyan rounded-xl text-xs font-black font-esports uppercase tracking-widest transition-all duration-300"
+                >
+                  Probar como Tienda
+                </button>
+                <button
+                  onClick={() => {
+                    sessionStorage.setItem('admin_view_mode', 'judge');
+                    window.location.reload();
+                  }}
+                  className="px-4 py-2.5 bg-beyblade-darker hover:bg-beyblade-electricCyan hover:text-beyblade-darker border border-white/10 hover:border-beyblade-electricCyan rounded-xl text-xs font-black font-esports uppercase tracking-widest transition-all duration-300"
+                >
+                  Probar como Juez
+                </button>
+                <button
+                  onClick={() => {
+                    sessionStorage.setItem('admin_view_mode', 'country_admin');
+                    window.location.reload();
+                  }}
+                  className="px-4 py-2.5 bg-beyblade-darker hover:bg-beyblade-electricCyan hover:text-beyblade-darker border border-white/10 hover:border-beyblade-electricCyan rounded-xl text-xs font-black font-esports uppercase tracking-widest transition-all duration-300"
+                >
+                  Probar como Distribuidor
+                </button>
+                <button
+                  onClick={() => {
+                    sessionStorage.removeItem('admin_view_mode');
+                    window.location.reload();
+                  }}
+                  className="px-4 py-2.5 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed text-white hover:text-white border border-beyblade-electricRed/30 rounded-xl text-xs font-black font-esports uppercase tracking-widest transition-all duration-300"
+                >
+                  Volver a Super Admin
+                </button>
+              </div>
+              
+              <div className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider font-esports">
+                Este modo solo cambia la vista de navegación. No modifica permisos reales ni roles en Supabase.
+              </div>
+            </div>
+          </div>
+
           {/* Sub-tab selection bar */}
           <div className="flex border-b border-white/5 pb-2">
             <button

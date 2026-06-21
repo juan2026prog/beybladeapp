@@ -14,6 +14,7 @@ interface UserSessionProfile {
   id: string;
   email: string;
   role: 'super_admin' | 'country_admin' | 'organizer' | 'judge' | 'store' | 'player' | 'Visitante';
+  realRole?: string;
 }
 
 export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -25,6 +26,18 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasPlayerProfile, setHasPlayerProfile] = useState(false);
+
+  const getRoleDisplayName = (r: string) => {
+    switch (r) {
+      case 'super_admin': return 'Super Admin';
+      case 'country_admin': return 'Distribuidor País';
+      case 'organizer': return 'Organizador';
+      case 'judge': return 'Juez';
+      case 'store': return 'Tienda';
+      case 'player': return 'Jugador';
+      default: return r;
+    }
+  };
 
   const fetchSessionProfile = async (userId: string, email: string) => {
     try {
@@ -45,13 +58,18 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
       setHasPlayerProfile(Boolean(player));
 
       if (!error && profile) {
-        setCurrentUser({ id: userId, email, role: profile.role });
+        let role = profile.role;
+        const viewMode = sessionStorage.getItem('admin_view_mode');
+        if (profile.role === 'super_admin' && viewMode) {
+          role = viewMode as any;
+        }
+        setCurrentUser({ id: userId, email, role, realRole: profile.role });
       } else {
-        setCurrentUser({ id: userId, email, role: 'Visitante' });
+        setCurrentUser({ id: userId, email, role: 'Visitante', realRole: 'Visitante' });
       }
     } catch (err) {
       console.error('Error fetching profile:', err);
-      setCurrentUser({ id: userId, email, role: 'Visitante' });
+      setCurrentUser({ id: userId, email, role: 'Visitante', realRole: 'Visitante' });
     }
   };
 
@@ -377,6 +395,30 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
 
       {/* Main Content Area */}
       <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">
+        {currentUser?.realRole === 'super_admin' && sessionStorage.getItem('admin_view_mode') && (
+          <div className="mb-6 bg-beyblade-electricRed/10 border border-beyblade-electricRed/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 z-10 relative">
+            <div className="flex items-center gap-3">
+              <Shield className="h-5 w-5 text-beyblade-electricRed animate-pulse" />
+              <div className="text-left">
+                <p className="text-xs font-black text-white uppercase tracking-wider font-esports">
+                  Modo de Vista Activo: <span className="text-beyblade-electricRed">{getRoleDisplayName(sessionStorage.getItem('admin_view_mode') || '')}</span>
+                </p>
+                <p className="text-[10px] text-gray-400 font-semibold mt-0.5">
+                  Este modo solo cambia la vista de navegación. No modifica permisos reales ni roles en Supabase.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                sessionStorage.removeItem('admin_view_mode');
+                window.location.reload();
+              }}
+              className="px-4 py-2 bg-beyblade-electricRed hover:bg-beyblade-electricRed/85 text-white font-black font-esports text-[10px] uppercase tracking-widest rounded-xl transition-all shrink-0"
+            >
+              Volver a Super Admin
+            </button>
+          </div>
+        )}
         {children}
       </main>
 
