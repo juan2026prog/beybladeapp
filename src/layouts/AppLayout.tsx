@@ -170,16 +170,17 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
         <div className="p-6 border-b border-white/5 flex items-center justify-between relative z-10">
           <Link to="/" className="flex items-center gap-2.5 group">
             {brandLogo ? (
-              <img src={brandLogo} className="h-8 w-auto object-contain max-w-[120px] rounded-lg" alt={brandTitle} />
-            ) : null}
-            <div className="flex flex-col">
-              <span className="font-title text-base text-transparent bg-clip-text bg-gradient-to-r from-beyblade-electricCyan via-white to-beyblade-electricRed tracking-widest uppercase drop-shadow-[0_0_10px_rgba(0,240,255,0.2)]">
-                {brandTitle}
-              </span>
-              <span className="text-[8px] text-beyblade-electricCyan font-esports font-bold tracking-widest uppercase mt-0.5">
-                {brandSubtitle}
-              </span>
-            </div>
+              <img src={brandLogo} className="h-10 w-auto object-contain max-w-[180px] rounded-lg" alt={brandTitle} />
+            ) : (
+              <div className="flex flex-col">
+                <span className="font-title text-xl text-transparent bg-clip-text bg-gradient-to-r from-beyblade-electricCyan via-white to-beyblade-electricRed tracking-widest uppercase drop-shadow-[0_0_10px_rgba(0,240,255,0.2)]">
+                  {brandTitle}
+                </span>
+                <span className="text-[9px] text-beyblade-electricCyan font-esports font-bold tracking-widest uppercase mt-0.5">
+                  {brandSubtitle}
+                </span>
+              </div>
+            )}
           </Link>
         </div>
 
@@ -279,11 +280,12 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
           </button>
           <Link to="/" className="flex items-center gap-2">
             {brandLogo ? (
-              <img src={brandLogo} className="h-6 w-auto object-contain max-w-[80px] rounded" alt={brandTitle} />
-            ) : null}
-            <span className="font-title text-base text-transparent bg-clip-text bg-gradient-to-r from-beyblade-electricCyan via-white to-beyblade-electricRed tracking-widest drop-shadow-[0_0_8px_rgba(0,240,255,0.2)]">
-              {brandTitle}
-            </span>
+              <img src={brandLogo} className="h-7 w-auto object-contain max-w-[120px] rounded" alt={brandTitle} />
+            ) : (
+              <span className="font-title text-base text-transparent bg-clip-text bg-gradient-to-r from-beyblade-electricCyan via-white to-beyblade-electricRed tracking-widest drop-shadow-[0_0_8px_rgba(0,240,255,0.2)]">
+                {brandTitle}
+              </span>
+            )}
           </Link>
         </div>
 
@@ -331,14 +333,15 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
             <div className="absolute right-0 top-0 bottom-0 w-[1px] bg-gradient-to-b from-beyblade-electricCyan/30 via-white/5 to-beyblade-electricRed/30" />
 
             <div className="flex items-center justify-between relative z-10">
-              <div className="flex items-center gap-2">
+              <Link to="/" className="flex items-center gap-2" onClick={() => setIsMobileMenuOpen(false)}>
                 {brandLogo ? (
-                  <img src={brandLogo} className="h-6 w-auto object-contain max-w-[80px] rounded" alt={brandTitle} />
-                ) : null}
-                <span className="font-title text-transparent bg-clip-text bg-gradient-to-r from-beyblade-electricCyan via-white to-beyblade-electricRed tracking-widest uppercase">
-                  {brandTitle}
-                </span>
-              </div>
+                  <img src={brandLogo} className="h-8 w-auto object-contain max-w-[140px] rounded" alt={brandTitle} />
+                ) : (
+                  <span className="font-title text-transparent bg-clip-text bg-gradient-to-r from-beyblade-electricCyan via-white to-beyblade-electricRed tracking-widest uppercase">
+                    {brandTitle}
+                  </span>
+                )}
+              </Link>
               <button onClick={() => setIsMobileMenuOpen(false)}>
                 <X className="h-6 w-6 text-gray-400" />
               </button>
