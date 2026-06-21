@@ -5,7 +5,7 @@ import {
   Calendar, Award
 } from 'lucide-react';
 import { DbService } from '../services/dbService';
-import type { Tournament, RankingEntry, NewsItem, Journey } from '../services/dbService';
+import type { Tournament, RankingEntry, NewsItem, Journey, HeroBanner } from '../services/dbService';
 
 export const Home: React.FC = () => {
   const navigate = useNavigate();
@@ -17,26 +17,60 @@ export const Home: React.FC = () => {
   const [dbJourneys, setDbJourneys] = useState<Journey[]>([]);
   const [rankingTab, setRankingTab] = useState<'Open' | 'Junior'>('Open');
 
+  // Hero Banners dynamic states
+  const [heroBanners, setHeroBanners] = useState<HeroBanner[]>([]);
+  const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
+
   useEffect(() => {
     const fetchHomeData = async () => {
       try {
-        const [tours, ranks, newsItems, journeysList] = await Promise.all([
+        const [tours, ranks, newsItems, journeysList, banners] = await Promise.all([
           DbService.getTournamentsList(),
           DbService.getRankingsList(),
           DbService.getNews(),
           DbService.getJourneys(),
+          DbService.getHeroBanners(),
         ]);
         
         setDbTournaments(tours);
         setDbRankings(ranks);
         setDbNews(newsItems);
         setDbJourneys(journeysList);
+        setHeroBanners(banners.filter(b => b.active));
       } catch (err) {
         console.error('Error fetching home data:', err);
       }
     };
     fetchHomeData();
   }, []);
+
+  // Active banners carousel setup
+  const activeBanners = useMemo(() => {
+    if (heroBanners.length > 0) return heroBanners;
+    return [{
+      badge: 'Uruguay Ecosistema Certificado',
+      title_l1: 'BEYBLADE X',
+      title_l2: 'URUGUAY',
+      subtitle: 'Prepárate para la aceleración Xtreme. Regístrate en torneos oficiales y escala el ranking nacional.',
+      cta_primary: 'Registrarme',
+      cta_primary_link: '/register',
+      cta_secondary: 'Ver Torneos',
+      cta_secondary_link: '/tournaments',
+      image_url: 'xtreme',
+      country_id: 'UY',
+      active: true
+    }];
+  }, [heroBanners]);
+
+  useEffect(() => {
+    if (activeBanners.length <= 1) return;
+    const timer = setInterval(() => {
+      setCurrentBannerIndex(prev => (prev + 1) % activeBanners.length);
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [activeBanners]);
+
+  const currentBanner = activeBanners[currentBannerIndex] || activeBanners[0];
 
   // --- UPCOMING TOURNAMENT DESTACADO ---
   const upcomingTournament = useMemo(() => {
@@ -143,59 +177,84 @@ export const Home: React.FC = () => {
         <div className="absolute -top-40 -left-40 w-96 h-96 bg-beyblade-electricCyan/5 rounded-full blur-[120px] pointer-events-none" />
         <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-beyblade-electricRed/5 rounded-full blur-[120px] pointer-events-none" />
         
-        <div className="flex-1 space-y-5 relative z-10">
+        <div className="flex-1 space-y-5 relative z-10 text-left">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-beyblade-electricCyan/10 border border-beyblade-electricCyan/20 text-beyblade-electricCyan text-[9px] font-black font-esports uppercase tracking-widest animate-pulse">
-            <Sparkles className="h-3 w-3" /> Uruguay Ecosistema Certificado
+            <Sparkles className="h-3 w-3" /> {currentBanner.badge}
           </div>
           
           <h1 className="text-4xl md:text-6xl font-black tracking-tight text-white uppercase leading-none font-esports">
             <span className="font-title text-transparent bg-clip-text bg-gradient-to-r from-beyblade-electricCyan via-white to-beyblade-electricRed drop-shadow-[0_0_10px_rgba(0,240,255,0.2)]">
-              BEYBLADE X
+              {currentBanner.title_l1}
             </span> 
             <br />
             <span className="text-glow-cyan text-white block mt-1 tracking-wider text-4xl md:text-5xl">
-              URUGUAY
+              {currentBanner.title_l2}
             </span>
           </h1>
 
           <p className="text-gray-300 text-xs md:text-sm leading-relaxed max-w-lg">
-            Prepárate para la aceleración Xtreme. Regístrate en torneos oficiales y escala el ranking nacional.
+            {currentBanner.subtitle}
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 pt-2 justify-center md:justify-start">
-            <Link
-              to="/register"
-              className="px-6 py-3.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports tracking-widest rounded-xl transition-all duration-300 hover:scale-105 active:scale-95 text-center text-xs shadow-neon-cyan uppercase flex items-center justify-center gap-2"
-            >
-              Registrarme
-            </Link>
-            <Link
-              to="/tournaments"
-              className="px-6 py-3.5 bg-beyblade-card/60 border border-white/10 hover:border-beyblade-electricCyan/40 hover:bg-white/5 text-white font-black font-esports tracking-widest rounded-xl transition-all duration-300 hover:scale-105 active:scale-95 text-center text-xs uppercase flex items-center justify-center"
-            >
-              Ver Torneos
-            </Link>
+            {currentBanner.cta_primary && currentBanner.cta_primary_link && (
+              <Link
+                to={currentBanner.cta_primary_link}
+                className="px-6 py-3.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports tracking-widest rounded-xl transition-all duration-300 hover:scale-105 active:scale-95 text-center text-xs shadow-neon-cyan uppercase flex items-center justify-center gap-2"
+              >
+                {currentBanner.cta_primary}
+              </Link>
+            )}
+            {currentBanner.cta_secondary && currentBanner.cta_secondary_link && (
+              <Link
+                to={currentBanner.cta_secondary_link}
+                className="px-6 py-3.5 bg-beyblade-card/60 border border-white/10 hover:border-beyblade-electricCyan/40 hover:bg-white/5 text-white font-black font-esports tracking-widest rounded-xl transition-all duration-300 hover:scale-105 active:scale-95 text-center text-xs uppercase flex items-center justify-center"
+              >
+                {currentBanner.cta_secondary}
+              </Link>
+            )}
           </div>
         </div>
 
-        {/* Stadium Mockup Decors */}
-        <div className="relative flex-1 flex justify-center items-center z-10 select-none">
-          <div className="relative w-64 h-64 md:w-80 md:h-80 flex items-center justify-center">
-            <div className="absolute inset-0 border-2 border-dashed border-beyblade-electricCyan/20 rounded-full animate-orbit-cw"></div>
-            <div className="absolute inset-6 border border-beyblade-electricRed/15 rounded-full animate-orbit-ccw"></div>
-            <div className="absolute inset-12 border-4 border-double border-beyblade-electricCyan/45 rounded-full animate-x-pulse shadow-[0_0_20px_rgba(0,240,255,0.15)]"></div>
-            
-            {/* Center Core spinner */}
-            <div className="w-40 h-40 md:w-48 md:h-48 rounded-full bg-gradient-to-tr from-beyblade-electricRed via-beyblade-dark to-beyblade-electricCyan p-1 animate-orbit-cw [animation-duration:3s] shadow-[0_0_25px_rgba(0,240,255,0.2)]">
-              <div className="w-full h-full rounded-full bg-beyblade-card flex flex-col items-center justify-center relative overflow-hidden">
-                <div className="absolute top-2.5 w-1.5 h-5 bg-beyblade-electricCyan rounded-full shadow-[0_0_8px_#00F0FF]"></div>
-                <div className="absolute bottom-2.5 w-1.5 h-5 bg-beyblade-electricRed rounded-full shadow-[0_0_8px_#FF0055]"></div>
-                <span className="text-white font-title text-base tracking-widest text-glow-cyan">X-LINE</span>
-                <span className="text-[7px] text-gray-500 font-esports font-bold tracking-widest uppercase mt-0.5">GEAR ACCEL</span>
+        {/* Stadium Mockup Decors or Custom Image */}
+        <div className="relative flex-grow flex-shrink-0 flex justify-center items-center z-10 select-none w-full lg:w-1/3 min-h-[250px]">
+          {currentBanner.image_url && currentBanner.image_url !== 'xtreme' ? (
+            <img 
+              src={currentBanner.image_url} 
+              alt="Banner Visual" 
+              className="w-full max-w-sm h-64 object-contain rounded-2xl drop-shadow-[0_0_20px_rgba(0,240,255,0.15)] animate-float-p1"
+            />
+          ) : (
+            <div className="relative w-64 h-64 md:w-80 md:h-80 flex items-center justify-center">
+              <div className="absolute inset-0 border-2 border-dashed border-beyblade-electricCyan/20 rounded-full animate-orbit-cw"></div>
+              <div className="absolute inset-6 border border-beyblade-electricRed/15 rounded-full animate-orbit-ccw"></div>
+              <div className="absolute inset-12 border-4 border-double border-beyblade-electricCyan/45 rounded-full animate-x-pulse shadow-[0_0_20px_rgba(0,240,255,0.15)]"></div>
+              
+              {/* Center Core spinner */}
+              <div className="w-40 h-40 md:w-48 md:h-48 rounded-full bg-gradient-to-tr from-beyblade-electricRed via-beyblade-dark to-beyblade-electricCyan p-1 animate-orbit-cw [animation-duration:3s] shadow-[0_0_25px_rgba(0,240,255,0.2)]">
+                <div className="w-full h-full rounded-full bg-beyblade-card flex flex-col items-center justify-center relative overflow-hidden">
+                  <div className="absolute top-2.5 w-1.5 h-5 bg-beyblade-electricCyan rounded-full shadow-[0_0_8px_#00F0FF]"></div>
+                  <div className="absolute bottom-2.5 w-1.5 h-5 bg-beyblade-electricRed rounded-full shadow-[0_0_8px_#FF0055]"></div>
+                  <span className="text-white font-title text-base tracking-widest text-glow-cyan">X-LINE</span>
+                  <span className="text-[7px] text-gray-500 font-esports font-bold tracking-widest uppercase mt-0.5">GEAR ACCEL</span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
+
+        {/* Carousel Indicators */}
+        {activeBanners.length > 1 && (
+          <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2 z-20">
+            {activeBanners.map((_, idx) => (
+              <button
+                key={idx}
+                onClick={() => setCurrentBannerIndex(idx)}
+                className={`w-2 h-2 rounded-full transition-all duration-300 ${idx === currentBannerIndex ? 'bg-beyblade-electricCyan w-5 shadow-[0_0_8px_#00F0FF]' : 'bg-white/20'}`}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* 2. Próximo Torneo Destacado */}

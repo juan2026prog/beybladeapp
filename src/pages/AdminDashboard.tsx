@@ -24,8 +24,14 @@ export const AdminDashboard: React.FC = () => {
   const [activeLocalities, setActiveLocalities] = useState<{ id: number; department: string; name: string; active: boolean }[]>([]);
 
   // Tab states
-  const [activeSuperTab, setActiveSuperTab] = useState<'analytics' | 'modules' | 'retail'>('analytics');
+  const [activeSuperTab, setActiveSuperTab] = useState<'analytics' | 'modules' | 'retail' | 'settings'>('analytics');
   const [activeDistributorTab, setActiveDistributorTab] = useState<'certifications' | 'stats' | 'retail'>('certifications');
+
+  // Hero Banners and Settings states
+  const [banners, setBanners] = useState<any[]>([]);
+  const [settings, setSettings] = useState<{ [key: string]: string }>({ brand_title: '', brand_subtitle: '', brand_logo: '' });
+  const [editingBanner, setEditingBanner] = useState<any | null>(null);
+  const [isCreatingBanner, setIsCreatingBanner] = useState(false);
   
   // Interactive Map states
   const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
@@ -299,6 +305,21 @@ export const AdminDashboard: React.FC = () => {
     if (userProfile.role === 'Super Admin' || userProfile.role === 'Distribuidor País') {
       const { data: stocksData } = await supabase.from('store_stock').select('*');
       setAllStocks(stocksData || []);
+    }
+
+    if (userProfile.role === 'Super Admin') {
+      try {
+        const bannerList = await DbService.getHeroBanners();
+        setBanners(bannerList);
+        const siteSettings = await DbService.getSiteSettings();
+        setSettings({
+          brand_title: siteSettings.brand_title || '',
+          brand_subtitle: siteSettings.brand_subtitle || '',
+          brand_logo: siteSettings.brand_logo || ''
+        });
+      } catch (err) {
+        console.error('Error loading banners/settings:', err);
+      }
     }
 
     // Load Super Admin / Distribuidor stats
@@ -852,6 +873,18 @@ export const AdminDashboard: React.FC = () => {
                 <Package className="h-4 w-4" /> Retail & Stock
               </span>
             </button>
+            <button
+              onClick={() => setActiveSuperTab('settings')}
+              className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                activeSuperTab === 'settings'
+                  ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Settings className="h-4 w-4" /> Personalización & Banners
+              </span>
+            </button>
           </div>
 
           {/* Tab 1: Analytics & KPIs */}
@@ -1326,6 +1359,409 @@ export const AdminDashboard: React.FC = () => {
                       );
                     })}
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 4: Branding & Hero Banners */}
+          {activeSuperTab === 'settings' && (
+            <div className="space-y-8 animate-fade-in text-left">
+              {/* Branding Settings Section */}
+              <div className="bg-beyblade-card border border-white/5 p-6 rounded-3xl space-y-4">
+                <h3 className="font-title text-base text-white uppercase tracking-wider flex items-center gap-2">
+                  <Settings className="h-5 w-5 text-beyblade-electricCyan" /> Personalización de Marca (Sidebar / Header / Logo)
+                </h3>
+                <p className="text-xs text-gray-400">
+                  Modifica los textos principales y el logo que se muestran en el menú de navegación lateral y el cabezal de la aplicación.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-500 font-bold uppercase">Título de Marca</label>
+                    <input
+                      type="text"
+                      value={settings.brand_title || ''}
+                      onChange={(e) => setSettings({ ...settings, brand_title: e.target.value })}
+                      placeholder="BEYBLADE X"
+                      className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-beyblade-electricCyan focus:outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-500 font-bold uppercase">Subtítulo de Marca</label>
+                    <input
+                      type="text"
+                      value={settings.brand_subtitle || ''}
+                      onChange={(e) => setSettings({ ...settings, brand_subtitle: e.target.value })}
+                      placeholder="LIGA LATAM OFICIAL"
+                      className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-beyblade-electricCyan focus:outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-[10px] text-gray-500 font-bold uppercase">Logo de Marca (URL o Archivo local)</label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="text"
+                        value={settings.brand_logo || ''}
+                        onChange={(e) => setSettings({ ...settings, brand_logo: e.target.value })}
+                        placeholder="https://... o selecciona un archivo para subir"
+                        className="flex-grow bg-beyblade-darker border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-beyblade-electricCyan focus:outline-none"
+                      />
+                      <label className="cursor-pointer bg-white/5 border border-white/10 hover:bg-white/10 text-white text-[10px] font-black font-esports uppercase tracking-widest px-4 py-3 rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap">
+                        <Camera className="h-3.5 w-3.5" /> Subir Logo
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                const base64String = reader.result as string;
+                                setSettings({ ...settings, brand_logo: base64String });
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                    {settings.brand_logo && (
+                      <div className="mt-2 flex items-center gap-4 bg-black/30 p-3 rounded-2xl border border-white/5">
+                        <img src={settings.brand_logo} className="h-12 w-auto object-contain rounded bg-black/50 p-1.5 border border-white/10" alt="Vista previa logo" />
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[9px] text-emerald-400 font-black uppercase tracking-wider font-esports">Logo Cargado</span>
+                          <button
+                            type="button"
+                            onClick={() => setSettings({ ...settings, brand_logo: '' })}
+                            className="text-[9px] text-beyblade-electricRed font-bold hover:underline text-left"
+                          >
+                            Eliminar Logo
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={async () => {
+                      try {
+                        await DbService.saveSiteSetting('brand_title', settings.brand_title || 'BEYBLADE X');
+                        await DbService.saveSiteSetting('brand_subtitle', settings.brand_subtitle || 'LIGA LATAM OFICIAL');
+                        await DbService.saveSiteSetting('brand_logo', settings.brand_logo || '');
+                        setFeedback('¡Ajustes de marca actualizados! Recarga la página para visualizar los cambios.');
+                        setTimeout(() => setFeedback(''), 3000);
+                      } catch (err: any) {
+                        setErrorMsg(err.message || 'Error al guardar ajustes.');
+                      }
+                    }}
+                    className="px-5 py-2.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports text-[10px] uppercase tracking-widest rounded-xl transition-all"
+                  >
+                    Guardar Marca
+                  </button>
+                </div>
+              </div>
+
+              {/* Banners Administration Section */}
+              <div className="bg-beyblade-card border border-white/5 p-6 rounded-3xl space-y-6">
+                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                  <div className="space-y-1">
+                    <h3 className="font-title text-base text-white uppercase tracking-wider flex items-center gap-2">
+                      <Trophy className="h-5 w-5 text-beyblade-electricRed" /> Banners del Home (Hasta 5 Banners)
+                    </h3>
+                    <p className="text-[11px] text-gray-400">
+                      Administra los banners promocionales rotativos de la página de inicio. Se mostrarán en un carrusel dinámico.
+                    </p>
+                  </div>
+                  {banners.length < 5 && !isCreatingBanner && !editingBanner && (
+                    <button
+                      onClick={() => {
+                        setEditingBanner({
+                          badge: 'URUGUAY ECOSISTEMA CERTIFICADO',
+                          title_l1: 'BEYBLADE X',
+                          title_l2: 'URUGUAY',
+                          subtitle: '¡Prepárate para el combate!',
+                          cta_primary: 'Registrarme',
+                          cta_primary_link: '/register',
+                          cta_secondary: 'Ver Torneos',
+                          cta_secondary_link: '/tournaments',
+                          image_url: 'xtreme',
+                          country_id: 'UY',
+                          active: true
+                        });
+                        setIsCreatingBanner(true);
+                      }}
+                      className="px-4 py-2 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports text-[9px] uppercase tracking-widest rounded-xl transition-all flex items-center gap-1.5"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Nuevo Banner
+                    </button>
+                  )}
+                </div>
+
+                {/* Edit Form Modal/Card */}
+                {(isCreatingBanner || editingBanner?.id) && editingBanner && (
+                  <div className="bg-beyblade-darker/60 p-6 rounded-2xl border border-beyblade-electricCyan/20 space-y-4 animate-fade-in">
+                    <h4 className="text-xs font-black text-beyblade-electricCyan uppercase tracking-widest font-esports border-b border-white/5 pb-2">
+                      {isCreatingBanner ? '➕ Crear Nuevo Banner Hero' : '📝 Editar Banner Hero'}
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-left">
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">Badge / Etiqueta Superior</label>
+                        <input
+                          type="text"
+                          value={editingBanner.badge}
+                          onChange={(e) => setEditingBanner({ ...editingBanner, badge: e.target.value })}
+                          className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">Título Línea 1</label>
+                        <input
+                          type="text"
+                          value={editingBanner.title_l1}
+                          onChange={(e) => setEditingBanner({ ...editingBanner, title_l1: e.target.value })}
+                          className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">Título Línea 2</label>
+                        <input
+                          type="text"
+                          value={editingBanner.title_l2}
+                          onChange={(e) => setEditingBanner({ ...editingBanner, title_l2: e.target.value })}
+                          className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">CTA Principal (Texto)</label>
+                        <input
+                          type="text"
+                          value={editingBanner.cta_primary || ''}
+                          onChange={(e) => setEditingBanner({ ...editingBanner, cta_primary: e.target.value })}
+                          className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">CTA Principal (Enlace/Ruta)</label>
+                        <input
+                          type="text"
+                          value={editingBanner.cta_primary_link || ''}
+                          onChange={(e) => setEditingBanner({ ...editingBanner, cta_primary_link: e.target.value })}
+                          className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">CTA Secundario (Texto)</label>
+                        <input
+                          type="text"
+                          value={editingBanner.cta_secondary || ''}
+                          onChange={(e) => setEditingBanner({ ...editingBanner, cta_secondary: e.target.value })}
+                          className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">CTA Secundario (Enlace/Ruta)</label>
+                        <input
+                          type="text"
+                          value={editingBanner.cta_secondary_link || ''}
+                          onChange={(e) => setEditingBanner({ ...editingBanner, cta_secondary_link: e.target.value })}
+                          className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">Código País (ej. UY)</label>
+                        <input
+                          type="text"
+                          value={editingBanner.country_id}
+                          onChange={(e) => setEditingBanner({ ...editingBanner, country_id: e.target.value })}
+                          className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">Imagen Derecha (URL o Archivo local)</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={editingBanner.image_url || ''}
+                            onChange={(e) => setEditingBanner({ ...editingBanner, image_url: e.target.value })}
+                            placeholder="xtreme o url de imagen"
+                            className="flex-grow bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                          />
+                          <label className="cursor-pointer bg-white/5 border border-white/10 hover:bg-white/10 text-white text-[9px] font-black font-esports uppercase tracking-widest px-3 py-2.5 rounded-xl transition-all flex items-center gap-1 whitespace-nowrap">
+                            <Camera className="h-3 w-3" /> Subir
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    const base64String = reader.result as string;
+                                    setEditingBanner({ ...editingBanner, image_url: base64String });
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+                        <div className="flex gap-2 mt-1">
+                          <button
+                            type="button"
+                            onClick={() => setEditingBanner({ ...editingBanner, image_url: 'xtreme' })}
+                            className="text-[8px] bg-white/5 border border-white/10 hover:bg-white/10 px-2.5 py-1 rounded text-gray-300 font-bold uppercase tracking-wider"
+                          >
+                            Usar Engranaje 3D
+                          </button>
+                          {editingBanner.image_url && editingBanner.image_url !== 'xtreme' && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingBanner({ ...editingBanner, image_url: '' })}
+                              className="text-[8px] bg-beyblade-electricRed/10 border border-beyblade-electricRed/20 hover:bg-beyblade-electricRed/20 px-2.5 py-1 rounded text-beyblade-electricRed font-bold uppercase tracking-wider"
+                            >
+                              Remover Imagen
+                            </button>
+                          )}
+                        </div>
+                        {editingBanner.image_url && editingBanner.image_url !== 'xtreme' && (
+                          <div className="mt-2 flex items-center gap-3 bg-black/30 p-2 rounded-xl border border-white/5">
+                            <img src={editingBanner.image_url} className="h-10 object-contain rounded bg-black/50 p-1 border border-white/10" alt="Preview Banner" />
+                            <span className="text-[9px] text-emerald-400 font-black uppercase font-esports tracking-wider">Imagen Cargada</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-1">
+                      <label className="text-[9px] text-gray-500 font-bold uppercase">Subtítulo / Párrafo Promocional</label>
+                      <textarea
+                        value={editingBanner.subtitle}
+                        onChange={(e) => setEditingBanner({ ...editingBanner, subtitle: e.target.value })}
+                        rows={2}
+                        className="w-full bg-beyblade-dark border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="banner_active_chk"
+                        checked={editingBanner.active}
+                        onChange={(e) => setEditingBanner({ ...editingBanner, active: e.target.checked })}
+                        className="rounded bg-beyblade-dark border border-white/10 text-beyblade-electricCyan focus:ring-0"
+                      />
+                      <label htmlFor="banner_active_chk" className="text-xs text-white font-bold cursor-pointer">
+                        Publicar Banner (Estado Activo)
+                      </label>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                      <button
+                        onClick={() => {
+                          setEditingBanner(null);
+                          setIsCreatingBanner(false);
+                        }}
+                        className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/5 text-gray-300 font-black font-esports text-[9px] uppercase tracking-widest rounded-xl transition-all"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            if (!editingBanner.badge || !editingBanner.title_l1 || !editingBanner.title_l2 || !editingBanner.subtitle) {
+                              throw new Error('Por favor completa todos los campos requeridos.');
+                            }
+                            await DbService.saveHeroBanner(editingBanner);
+                            setFeedback('¡Banner guardado correctamente!');
+                            setTimeout(() => setFeedback(''), 3000);
+                            
+                            // Reload banners
+                            const bannerList = await DbService.getHeroBanners();
+                            setBanners(bannerList);
+                            
+                            setEditingBanner(null);
+                            setIsCreatingBanner(false);
+                          } catch (err: any) {
+                            setErrorMsg(err.message || 'Error al guardar banner.');
+                            setTimeout(() => setErrorMsg(''), 4000);
+                          }
+                        }}
+                        className="px-5 py-2.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports text-[9px] uppercase tracking-widest rounded-xl transition-all"
+                      >
+                        Guardar Banner
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Banner Cards Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {banners.map((banner) => (
+                    <div
+                      key={banner.id}
+                      className="bg-beyblade-darker/40 p-5 rounded-2xl border border-white/5 hover:border-white/10 flex flex-col justify-between gap-4 transition-all duration-300 relative"
+                    >
+                      <div className="absolute top-4 right-4 flex items-center gap-1.5">
+                        <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded ${banner.active ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-white/5 text-gray-500 border border-white/10'}`}>
+                          {banner.active ? 'Activo' : 'Inactivo'}
+                        </span>
+                        <span className="bg-white/5 border border-white/10 text-gray-300 text-[8px] font-extrabold px-1.5 py-0.5 rounded">
+                          {banner.country_id}
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-2 text-left">
+                        <span className="text-[9px] text-beyblade-electricCyan font-black uppercase tracking-wider">{banner.badge}</span>
+                        <h4 className="text-sm font-black text-white uppercase font-esports leading-tight">
+                          {banner.title_l1} <span className="text-beyblade-electricRed">{banner.title_l2}</span>
+                        </h4>
+                        <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed">
+                          {banner.subtitle}
+                        </p>
+                      </div>
+
+                      <div className="flex justify-end gap-2 border-t border-white/5 pt-3">
+                        <button
+                          onClick={() => {
+                            setEditingBanner(banner);
+                            setIsCreatingBanner(false);
+                          }}
+                          className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-white font-black font-esports text-[8px] uppercase tracking-widest rounded-lg transition-all"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm('¿Seguro que deseas eliminar este banner?')) return;
+                            try {
+                              await DbService.deleteHeroBanner(banner.id);
+                              setFeedback('Banner eliminado correctamente.');
+                              setTimeout(() => setFeedback(''), 3000);
+                              
+                              const bannerList = await DbService.getHeroBanners();
+                              setBanners(bannerList);
+                            } catch (err: any) {
+                              setErrorMsg(err.message || 'Error al eliminar banner.');
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed text-white font-black font-esports text-[8px] uppercase tracking-widest rounded-lg transition-all"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {banners.length === 0 && !isCreatingBanner && (
+                    <div className="bg-beyblade-darker/30 p-12 rounded-3xl border border-dashed border-white/5 text-center col-span-2 space-y-2">
+                      <Trophy className="h-8 w-8 text-gray-500 mx-auto" />
+                      <p className="text-xs text-gray-400 font-bold">No hay banners personalizados creados.</p>
+                      <p className="text-[10px] text-gray-500">Se mostrará el banner por defecto del ecosistema de Uruguay.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

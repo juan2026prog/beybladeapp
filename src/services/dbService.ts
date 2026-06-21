@@ -79,6 +79,22 @@ export interface Product {
   status: 'disponible' | 'proximo lanzamiento' | 'agotado';
 }
 
+export interface HeroBanner {
+  id?: string;
+  badge: string;
+  title_l1: string;
+  title_l2: string;
+  subtitle: string;
+  cta_primary?: string;
+  cta_primary_link?: string;
+  cta_secondary?: string;
+  cta_secondary_link?: string;
+  image_url?: string;
+  country_id: string;
+  active: boolean;
+  created_at?: string;
+}
+
 export interface StoreStock {
   store_id: string;
   product_id: string;
@@ -1000,6 +1016,60 @@ export class DbService {
 
     if (error) throw error;
     return data || [];
+  }
+
+  // --- HERO BANNERS MANAGEMENT ---
+  public static async getHeroBanners(): Promise<HeroBanner[]> {
+    const { data, error } = await supabase
+      .from('hero_banners')
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  }
+
+  public static async saveHeroBanner(banner: Omit<HeroBanner, 'created_at'>): Promise<void> {
+    if (banner.id) {
+      const { error } = await supabase
+        .from('hero_banners')
+        .update(banner)
+        .eq('id', banner.id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('hero_banners')
+        .insert(banner);
+      if (error) throw error;
+    }
+  }
+
+  public static async deleteHeroBanner(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('hero_banners')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  }
+
+  // --- SITE SETTINGS ---
+  public static async getSiteSettings(): Promise<{ [key: string]: string }> {
+    const { data, error } = await supabase
+      .from('site_settings')
+      .select('*');
+    if (error) throw error;
+    
+    const settings: { [key: string]: string } = {};
+    (data || []).forEach(s => {
+      settings[s.key] = s.value;
+    });
+    return settings;
+  }
+
+  public static async saveSiteSetting(key: string, value: string): Promise<void> {
+    const { error } = await supabase
+      .from('site_settings')
+      .upsert({ key, value });
+    if (error) throw error;
   }
 }
 
