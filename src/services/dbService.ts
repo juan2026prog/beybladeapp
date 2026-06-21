@@ -289,7 +289,7 @@ export class DbService {
   // ORGANIZERS & JUDGES
   // -------------------------------------------------------------
   public static async getOrganizersList(): Promise<Organizer[]> {
-    const { data, error } = await supabase.from('organizers').select('id, level, status, locality_id, locality_name, store_affiliation, country_id, profiles(email)');
+    const { data, error } = await supabase.from('organizers').select('id, level, status, locality_id, store_affiliation, country_id, profiles(email), localities(name)');
     if (error) throw error;
     
     return (data || []).map(o => ({
@@ -298,7 +298,7 @@ export class DbService {
       level: o.level,
       status: o.status,
       locality_id: o.locality_id || 1,
-      locality_name: 'Montevideo',
+      locality_name: (o.localities as any)?.name || 'Montevideo',
       store_affiliation: o.store_affiliation || undefined,
       country_id: o.country_id || 'UY'
     }));
@@ -318,7 +318,7 @@ export class DbService {
   }
 
   public static async getJudgesList(): Promise<Judge[]> {
-    const { data, error } = await supabase.from('judges').select('id, status, locality_id, locality_name, country_id, profiles(email)');
+    const { data, error } = await supabase.from('judges').select('id, status, locality_id, country_id, profiles(email), localities(name)');
     if (error) throw error;
     
     return (data || []).map(j => ({
@@ -326,7 +326,7 @@ export class DbService {
       name: (j.profiles as any)?.email?.split('@')[0] || 'Juez',
       status: j.status,
       locality_id: j.locality_id || 1,
-      locality_name: 'Montevideo',
+      locality_name: (j.localities as any)?.name || 'Montevideo',
       country_id: j.country_id || 'UY'
     }));
   }
