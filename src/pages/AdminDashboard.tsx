@@ -715,24 +715,23 @@ export const AdminDashboard: React.FC = () => {
       const orgProfile = organizers.find(o => o.id === currentUser.id);
       
       // Determine final organizer ID to use
-      let finalOrgId = currentUser.id;
-      let finalOrgName = currentUser.email || 'Organizador';
+      let finalOrgId = '';
+      let finalOrgName = '';
 
       if (currentUser.role === 'Organizador') {
-        if (orgProfile) {
-          finalOrgId = orgProfile.id;
-          finalOrgName = orgProfile.name;
+        if (!orgProfile || orgProfile.status !== 'Aprobado') {
+          throw new Error('Tu acreditación de organizador debe ser Aprobada por el distribuidor nacional para poder agregar fechas.');
         }
+        finalOrgId = orgProfile.id;
+        finalOrgName = orgProfile.name;
       } else {
-        // For admins/distributors, use selected organizer or fallback to admin
+        // For admins/distributors, use selected organizer and validate it is present
         const chosenOrg = organizers.find(o => o.id === newFechaOrganizerId);
-        if (chosenOrg) {
-          finalOrgId = chosenOrg.id;
-          finalOrgName = chosenOrg.name;
-        } else if (orgProfile) {
-          finalOrgId = orgProfile.id;
-          finalOrgName = orgProfile.name;
+        if (!chosenOrg) {
+          throw new Error('Selecciona un organizador aprobado para esta fecha.');
         }
+        finalOrgId = chosenOrg.id;
+        finalOrgName = chosenOrg.name;
       }
 
       await DbService.createTournament({
