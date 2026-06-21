@@ -754,6 +754,7 @@ export const AdminDashboard: React.FC = () => {
                 <button
                   onClick={() => {
                     sessionStorage.setItem('admin_view_mode', 'player');
+                    window.location.href = `#/profile/${currentUser.id}`;
                     window.location.reload();
                   }}
                   className="px-4 py-2.5 bg-beyblade-darker hover:bg-beyblade-electricCyan hover:text-beyblade-darker border border-white/10 hover:border-beyblade-electricCyan rounded-xl text-xs font-black font-esports uppercase tracking-widest transition-all duration-300"
