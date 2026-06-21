@@ -124,6 +124,18 @@ export const AdminDashboard: React.FC = () => {
   const [newSeasonEndDate, setNewSeasonEndDate] = useState('');
   const [newSeasonDesc, setNewSeasonDesc] = useState('');
 
+  // Adding date/tournament to season state
+  const [addingDateSeasonId, setAddingDateSeasonId] = useState<string | null>(null);
+  const [newFechaName, setNewFechaName] = useState('');
+  const [newFechaDate, setNewFechaDate] = useState('');
+  const [newFechaTime, setNewFechaTime] = useState('');
+  const [newFechaLocation, setNewFechaLocation] = useState<NormalizedLocation | null>(null);
+  const [newFechaDesc, setNewFechaDesc] = useState('');
+  const [newFechaSlots, setNewFechaSlots] = useState(16);
+  const [newFechaFormat, setNewFechaFormat] = useState<'Eliminación Directa' | 'Suizo' | 'Round Robin'>('Eliminación Directa');
+  const [newFechaJudgeId, setNewFechaJudgeId] = useState('');
+  const [newFechaOrganizerId, setNewFechaOrganizerId] = useState('');
+
   // Tournament details competitive states for organizer
   const [_tournamentBrackets, setTournamentBrackets] = useState<Bracket[]>([]);
   const [activeBracket, setActiveBracket] = useState<Bracket | null>(null);
@@ -670,6 +682,125 @@ export const AdminDashboard: React.FC = () => {
       loadData();
     } catch (err: any) {
       setErrorMsg(err.message || 'Error al eliminar torneo.');
+    }
+  };
+
+  const handleAddFechaToSeason = async (season: Season) => {
+    setErrorMsg('');
+    setFeedback('');
+
+    if (!newFechaName || !newFechaLocation || !newFechaDate || !newFechaTime) {
+      setErrorMsg('Completa los campos obligatorios para la fecha y selecciona una ubicación.');
+      return;
+    }
+
+    const selectedCountryCode = newFechaLocation.country_code?.toUpperCase();
+    const userCountryCode = (currentUser.country_id || 'UY').toUpperCase();
+
+    if (selectedCountryCode && userCountryCode && selectedCountryCode !== userCountryCode) {
+      setErrorMsg(`La ubicación seleccionada (${selectedCountryCode}) no corresponde a tu país de registro (${userCountryCode}).`);
+      return;
+    }
+
+    try {
+      const selectedJudge = judges.find(j => j.id === newFechaJudgeId);
+      
+      let mappedLeague: 'Junior' | 'Open' | 'Ambas' = 'Open';
+      if (season.league_type === 'junior') {
+        mappedLeague = 'Junior';
+      } else if (season.league_type === 'open') {
+        mappedLeague = 'Open';
+      }
+
+      const orgProfile = organizers.find(o => o.id === currentUser.id);
+      
+      // Determine final organizer ID to use
+      let finalOrgId = currentUser.id;
+      let finalOrgName = currentUser.email || 'Organizador';
+
+      if (currentUser.role === 'Organizador') {
+        if (orgProfile) {
+          finalOrgId = orgProfile.id;
+          finalOrgName = orgProfile.name;
+        }
+      } else {
+        // For admins/distributors, use selected organizer or fallback to admin
+        const chosenOrg = organizers.find(o => o.id === newFechaOrganizerId);
+        if (chosenOrg) {
+          finalOrgId = chosenOrg.id;
+          finalOrgName = chosenOrg.name;
+        } else if (orgProfile) {
+          finalOrgId = orgProfile.id;
+          finalOrgName = orgProfile.name;
+        }
+      }
+
+      await DbService.createTournament({
+        name: newFechaName,
+        league_id: mappedLeague,
+        country_id: selectedCountryCode || userCountryCode,
+        department: newFechaLocation.department || 'Montevideo',
+        locality: newFechaLocation.locality || 'Montevideo',
+        address: newFechaLocation.address || newFechaLocation.full_address,
+        date: newFechaDate,
+        time: newFechaTime,
+        slots_total: newFechaSlots,
+        format: newFechaFormat,
+        judge_id: newFechaJudgeId || undefined,
+        judge_name: selectedJudge ? selectedJudge.name : undefined,
+        organizer_id: finalOrgId,
+        organizer_name: finalOrgName,
+        description: newFechaDesc,
+        status: 'publicado',
+        latitude: newFechaLocation.latitude,
+        longitude: newFechaLocation.longitude,
+        full_address: newFechaLocation.full_address,
+        geocoding_provider: newFechaLocation.geocoding_provider,
+        osm_place_id: newFechaLocation.osm_place_id,
+        osm_type: newFechaLocation.osm_type,
+        osm_class: newFechaLocation.osm_class,
+        osm_importance: newFechaLocation.osm_importance,
+        geocoded_at: new Date().toISOString(),
+        season_id: season.id
+      });
+
+      // Get locality_id for notifications
+      const { data: locData } = await supabase
+        .from('localities')
+        .select('id')
+        .eq('name', newFechaLocation.locality || 'Montevideo')
+        .maybeSingle();
+      const locId = locData?.id || 1;
+
+      // Dispatch notifications
+      await dispatchNotifications(
+        'new_tournament',
+        'Nueva fecha de Liga',
+        `Se añadió la fecha "${newFechaName}" a la temporada "${season.name}".`,
+        `/tournaments`,
+        selectedCountryCode || userCountryCode,
+        locId,
+        newFechaLocation.locality || 'Montevideo'
+      );
+
+      setFeedback(`¡Fecha "${newFechaName}" agregada a la temporada "${season.name}" con éxito!`);
+      setAddingDateSeasonId(null);
+      
+      // Reset form
+      setNewFechaName('');
+      setNewFechaDate('');
+      setNewFechaTime('');
+      setNewFechaLocation(null);
+      setNewFechaDesc('');
+      setNewFechaSlots(16);
+      setNewFechaFormat('Eliminación Directa');
+      setNewFechaJudgeId('');
+      setNewFechaOrganizerId('');
+
+      loadData();
+      setTimeout(() => setFeedback(''), 3000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al agregar fecha.');
     }
   };
 
@@ -2832,7 +2963,7 @@ export const AdminDashboard: React.FC = () => {
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9px] text-gray-500 font-bold uppercase">Fecha Fin</label>
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">Fecha Fin (Opcional)</label>
                         <input
                           type="date"
                           value={newSeasonEndDate}
@@ -2855,15 +2986,15 @@ export const AdminDashboard: React.FC = () => {
                       type="button"
                       onClick={async () => {
                         try {
-                          if (!newSeasonName || !newSeasonStartDate || !newSeasonEndDate) {
-                            throw new Error('Por favor completa todos los campos.');
+                          if (!newSeasonName || !newSeasonStartDate) {
+                            throw new Error('Por favor completa los campos obligatorios (Nombre y Fecha de Inicio).');
                           }
                           await DbService.createSeason({
                             name: newSeasonName,
                             country_id: currentUser.country_id || 'UY',
                             league_type: newSeasonLeague,
                             start_date: newSeasonStartDate,
-                            end_date: newSeasonEndDate,
+                            end_date: newSeasonEndDate || undefined,
                             description: newSeasonDesc,
                             status: 'draft'
                           });
@@ -2896,7 +3027,7 @@ export const AdminDashboard: React.FC = () => {
                           <div>
                             <h4 className="font-extrabold text-white text-sm uppercase">{season.name}</h4>
                             <p className="text-xs text-gray-400">
-                              Rango: {new Date(season.start_date).toLocaleDateString()} al {new Date(season.end_date).toLocaleDateString()}
+                              Rango: {new Date(season.start_date).toLocaleDateString()} al {season.end_date ? new Date(season.end_date).toLocaleDateString() : 'Indefinido'}
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5">
@@ -2920,6 +3051,157 @@ export const AdminDashboard: React.FC = () => {
                             {season.description}
                           </p>
                         )}
+
+                        {/* Fechas / Torneos of the season */}
+                        {(() => {
+                          const seasonTournaments = tournaments.filter(t => t.season_id === season.id);
+                          return (
+                            <div className="space-y-3 border-t border-white/5 pt-3">
+                              <div className="flex justify-between items-center">
+                                <h5 className="text-[10px] text-gray-400 font-extrabold uppercase tracking-wider font-esports">Fechas / Torneos</h5>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (addingDateSeasonId === season.id) {
+                                      setAddingDateSeasonId(null);
+                                    } else {
+                                      setAddingDateSeasonId(season.id || null);
+                                      setNewFechaName(`Fecha ${seasonTournaments.length + 1}`);
+                                      setNewFechaDate('');
+                                      setNewFechaTime('');
+                                      setNewFechaLocation(null);
+                                      setNewFechaDesc('');
+                                      setNewFechaOrganizerId('');
+                                      setNewFechaJudgeId('');
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 bg-beyblade-electricCyan/10 hover:bg-beyblade-electricCyan hover:text-beyblade-darker border border-beyblade-electricCyan/20 hover:border-transparent text-beyblade-electricCyan font-black font-esports text-[8px] uppercase tracking-widest rounded transition-all"
+                                >
+                                  {addingDateSeasonId === season.id ? 'Cancelar' : '+ Agregar Fecha'}
+                                </button>
+                              </div>
+
+                              {addingDateSeasonId === season.id && (
+                                <div className="bg-black/30 border border-beyblade-electricCyan/20 p-4 rounded-xl space-y-3 mt-2 text-left">
+                                  <h6 className="font-extrabold text-[9px] text-white uppercase tracking-wider font-title">Nueva Fecha para {season.name}</h6>
+                                  
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                                    <div className="space-y-1">
+                                      <label className="text-[9px] text-gray-500 font-bold uppercase">Nombre de la Fecha *</label>
+                                      <input
+                                        type="text"
+                                        value={newFechaName}
+                                        onChange={(e) => setNewFechaName(e.target.value)}
+                                        placeholder="Ej: Fecha 1"
+                                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[9px] text-gray-500 font-bold uppercase">Lugar *</label>
+                                      <LocationAutocomplete
+                                        countryCode={season.country_id}
+                                        initialAddress=""
+                                        onSelect={(loc) => setNewFechaLocation(loc)}
+                                        placeholder="Busca el lugar..."
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-3 text-xs">
+                                    <div className="space-y-1">
+                                      <label className="text-[9px] text-gray-500 font-bold uppercase">Fecha *</label>
+                                      <input
+                                        type="date"
+                                        value={newFechaDate}
+                                        onChange={(e) => setNewFechaDate(e.target.value)}
+                                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[9px] text-gray-500 font-bold uppercase">Hora *</label>
+                                      <input
+                                        type="time"
+                                        value={newFechaTime}
+                                        onChange={(e) => setNewFechaTime(e.target.value)}
+                                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-1 text-xs">
+                                    <label className="text-[9px] text-gray-500 font-bold uppercase">Organizador del Evento *</label>
+                                    <select
+                                      value={newFechaOrganizerId}
+                                      onChange={(e) => setNewFechaOrganizerId(e.target.value)}
+                                      className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white cursor-pointer"
+                                    >
+                                      <option value="">Selecciona Organizador Aprobado</option>
+                                      {organizers.filter(o => o.status === 'Aprobado' && o.country_id === season.country_id).map(o => (
+                                        <option key={o.id} value={o.id}>{o.name || (o as any).profiles?.email || o.id}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div className="space-y-1 text-xs">
+                                    <label className="text-[9px] text-gray-500 font-bold uppercase">Descripción (Opcional)</label>
+                                    <textarea
+                                      value={newFechaDesc}
+                                      onChange={(e) => setNewFechaDesc(e.target.value)}
+                                      placeholder="Reglas, premios u otros detalles..."
+                                      rows={2}
+                                      className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                                    />
+                                  </div>
+
+                                  <div className="flex justify-end gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setAddingDateSeasonId(null)}
+                                      className="px-3 py-1 bg-white/5 hover:bg-white/10 text-gray-400 font-bold text-[9px] uppercase tracking-wider rounded-lg transition-all"
+                                    >
+                                      Cancelar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAddFechaToSeason(season)}
+                                      className="px-4 py-1 bg-beyblade-electricCyan text-beyblade-darker font-bold text-[9px] uppercase tracking-wider rounded-lg transition-all"
+                                    >
+                                      Guardar
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="grid grid-cols-1 gap-2 mt-2">
+                                {seasonTournaments.map(t => (
+                                  <div key={t.id} className="bg-black/30 border border-white/5 rounded-xl p-3 flex justify-between items-center text-xs">
+                                    <div>
+                                      <div className="font-extrabold text-white uppercase">{t.name}</div>
+                                      <div className="text-gray-400 text-[10px] font-semibold mt-0.5">
+                                        {new Date(t.date).toLocaleDateString()} a las {t.time} • {t.locality}, {t.department}
+                                      </div>
+                                      {t.description && (
+                                        <div className="text-gray-500 text-[10px] mt-1 font-sans italic line-clamp-1">{t.description}</div>
+                                      )}
+                                    </div>
+                                    <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded ${
+                                      t.status === 'finalizado'
+                                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/10'
+                                        : t.status === 'en curso'
+                                          ? 'bg-beyblade-electricRed/10 text-beyblade-electricRed border border-beyblade-electricRed/10 animate-pulse'
+                                          : 'bg-beyblade-electricCyan/10 text-beyblade-electricCyan border border-beyblade-electricCyan/10'
+                                    }`}>
+                                      {t.status === 'finalizado' ? 'Finalizado' : t.status === 'en curso' ? 'En Vivo' : 'Programado'}
+                                    </span>
+                                  </div>
+                                ))}
+                                {seasonTournaments.length === 0 && (
+                                  <p className="text-[10px] text-gray-500 italic">No hay fechas agregadas a esta temporada.</p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         <div className="flex justify-end gap-2 border-t border-white/5 pt-3">
                           {season.status === 'draft' && (
@@ -4195,7 +4477,7 @@ export const AdminDashboard: React.FC = () => {
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9px] text-gray-500 font-bold uppercase">Fin</label>
+                        <label className="text-[9px] text-gray-500 font-bold uppercase">Fin (Opcional)</label>
                         <input
                           type="date"
                           value={newSeasonEndDate}
@@ -4218,15 +4500,15 @@ export const AdminDashboard: React.FC = () => {
                       type="button"
                       onClick={async () => {
                         try {
-                          if (!newSeasonName || !newSeasonStartDate || !newSeasonEndDate) {
-                            throw new Error('Por favor completa todos los campos.');
+                          if (!newSeasonName || !newSeasonStartDate) {
+                            throw new Error('Por favor completa los campos obligatorios (Nombre y Fecha de Inicio).');
                           }
                           await DbService.createSeason({
                             name: newSeasonName,
                             country_id: currentUser.country_id || 'UY',
                             league_type: newSeasonLeague,
                             start_date: newSeasonStartDate,
-                            end_date: newSeasonEndDate,
+                            end_date: newSeasonEndDate || undefined,
                             description: newSeasonDesc,
                             status: 'draft'
                           });
@@ -4258,7 +4540,7 @@ export const AdminDashboard: React.FC = () => {
                           <div>
                             <h4 className="font-extrabold text-white text-sm uppercase">{season.name}</h4>
                             <p className="text-[10px] text-gray-500 font-bold mt-0.5">
-                              Rango: {new Date(season.start_date).toLocaleDateString()} al {new Date(season.end_date).toLocaleDateString()}
+                              Rango: {new Date(season.start_date).toLocaleDateString()} al {season.end_date ? new Date(season.end_date).toLocaleDateString() : 'Indefinido'}
                             </p>
                           </div>
                           <span className={`px-2 py-0.5 rounded text-[8px] font-black font-esports uppercase tracking-widest ${
@@ -4279,6 +4561,143 @@ export const AdminDashboard: React.FC = () => {
                             {season.description}
                           </p>
                         )}
+
+                        {/* Fechas / Torneos of the season */}
+                        {(() => {
+                          const seasonTournaments = tournaments.filter(t => t.season_id === season.id);
+                          return (
+                            <div className="space-y-3 border-t border-white/5 pt-3">
+                              <div className="flex justify-between items-center">
+                                <h5 className="text-[10px] text-gray-400 font-extrabold uppercase tracking-wider font-esports">Fechas / Torneos</h5>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (addingDateSeasonId === season.id) {
+                                      setAddingDateSeasonId(null);
+                                    } else {
+                                      setAddingDateSeasonId(season.id || null);
+                                      setNewFechaName(`Fecha ${seasonTournaments.length + 1}`);
+                                      setNewFechaDate('');
+                                      setNewFechaTime('');
+                                      setNewFechaLocation(null);
+                                      setNewFechaDesc('');
+                                      setNewFechaOrganizerId('');
+                                      setNewFechaJudgeId('');
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 bg-beyblade-electricCyan/10 hover:bg-beyblade-electricCyan hover:text-beyblade-darker border border-beyblade-electricCyan/20 hover:border-transparent text-beyblade-electricCyan font-black font-esports text-[8px] uppercase tracking-widest rounded transition-all"
+                                >
+                                  {addingDateSeasonId === season.id ? 'Cancelar' : '+ Agregar Fecha'}
+                                </button>
+                              </div>
+
+                              {addingDateSeasonId === season.id && (
+                                <div className="bg-black/30 border border-beyblade-electricCyan/20 p-4 rounded-xl space-y-3 mt-2 text-left">
+                                  <h6 className="font-extrabold text-[9px] text-white uppercase tracking-wider font-title">Nueva Fecha para {season.name}</h6>
+                                  
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                                    <div className="space-y-1">
+                                      <label className="text-[9px] text-gray-500 font-bold uppercase">Nombre de la Fecha *</label>
+                                      <input
+                                        type="text"
+                                        value={newFechaName}
+                                        onChange={(e) => setNewFechaName(e.target.value)}
+                                        placeholder="Ej: Fecha 1"
+                                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[9px] text-gray-500 font-bold uppercase">Lugar *</label>
+                                      <LocationAutocomplete
+                                        countryCode={season.country_id}
+                                        initialAddress=""
+                                        onSelect={(loc) => setNewFechaLocation(loc)}
+                                        placeholder="Busca el lugar..."
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-3 text-xs">
+                                    <div className="space-y-1">
+                                      <label className="text-[9px] text-gray-500 font-bold uppercase">Fecha *</label>
+                                      <input
+                                        type="date"
+                                        value={newFechaDate}
+                                        onChange={(e) => setNewFechaDate(e.target.value)}
+                                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[9px] text-gray-500 font-bold uppercase">Hora *</label>
+                                      <input
+                                        type="time"
+                                        value={newFechaTime}
+                                        onChange={(e) => setNewFechaTime(e.target.value)}
+                                        className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-1 text-xs">
+                                    <label className="text-[9px] text-gray-500 font-bold uppercase">Descripción (Opcional)</label>
+                                    <textarea
+                                      value={newFechaDesc}
+                                      onChange={(e) => setNewFechaDesc(e.target.value)}
+                                      placeholder="Reglas, premios u otros detalles..."
+                                      rows={2}
+                                      className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                                    />
+                                  </div>
+
+                                  <div className="flex justify-end gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setAddingDateSeasonId(null)}
+                                      className="px-3 py-1 bg-white/5 hover:bg-white/10 text-gray-400 font-bold text-[9px] uppercase tracking-wider rounded-lg transition-all"
+                                    >
+                                      Cancelar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAddFechaToSeason(season)}
+                                      className="px-4 py-1 bg-beyblade-electricCyan text-beyblade-darker font-bold text-[9px] uppercase tracking-wider rounded-lg transition-all"
+                                    >
+                                      Guardar
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="grid grid-cols-1 gap-2 mt-2">
+                                {seasonTournaments.map(t => (
+                                  <div key={t.id} className="bg-black/30 border border-white/5 rounded-xl p-3 flex justify-between items-center text-xs">
+                                    <div>
+                                      <div className="font-extrabold text-white uppercase">{t.name}</div>
+                                      <div className="text-gray-400 text-[10px] font-semibold mt-0.5">
+                                        {new Date(t.date).toLocaleDateString()} a las {t.time} • {t.locality}, {t.department}
+                                      </div>
+                                      {t.description && (
+                                        <div className="text-gray-500 text-[10px] mt-1 font-sans italic line-clamp-1">{t.description}</div>
+                                      )}
+                                    </div>
+                                    <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded ${
+                                      t.status === 'finalizado'
+                                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/10'
+                                        : t.status === 'en curso'
+                                          ? 'bg-beyblade-electricRed/10 text-beyblade-electricRed border border-beyblade-electricRed/10 animate-pulse'
+                                          : 'bg-beyblade-electricCyan/10 text-beyblade-electricCyan border border-beyblade-electricCyan/10'
+                                    }`}>
+                                      {t.status === 'finalizado' ? 'Finalizado' : t.status === 'en curso' ? 'En Vivo' : 'Programado'}
+                                    </span>
+                                  </div>
+                                ))}
+                                {seasonTournaments.length === 0 && (
+                                  <p className="text-[10px] text-gray-500 italic">No hay fechas agregadas a esta temporada.</p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
                         <div className="flex gap-2 pt-1 border-t border-white/5">
                           {season.status === 'draft' && (
                             <button

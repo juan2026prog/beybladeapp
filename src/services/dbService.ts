@@ -1680,7 +1680,7 @@ export interface Season {
   country_id: string;
   league_type: 'junior' | 'open';
   start_date: string;
-  end_date: string;
+  end_date?: string;
   description?: string;
   status: 'draft' | 'active' | 'completed';
   created_at?: string;
