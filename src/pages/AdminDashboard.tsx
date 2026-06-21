@@ -1417,8 +1417,75 @@ export const AdminDashboard: React.FC = () => {
                             if (file) {
                               const reader = new FileReader();
                               reader.onloadend = () => {
-                                const base64String = reader.result as string;
-                                setSettings({ ...settings, brand_logo: base64String });
+                                const originalBase64 = reader.result as string;
+                                
+                                // Create an image to inspect and process pixels via canvas
+                                const img = new Image();
+                                img.src = originalBase64;
+                                img.onload = () => {
+                                  const canvas = document.createElement('canvas');
+                                  canvas.width = img.width;
+                                  canvas.height = img.height;
+                                  const ctx = canvas.getContext('2d');
+                                  if (ctx) {
+                                    ctx.drawImage(img, 0, 0);
+                                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                                    const data = imageData.data;
+                                    
+                                    // Detect background type from corner (0,0)
+                                    const r0 = data[0];
+                                    const g0 = data[1];
+                                    const b0 = data[2];
+                                    const a0 = data[3];
+                                    
+                                    const isTransparent = a0 < 50;
+                                    const isDarkBg = !isTransparent && (r0 * 0.299 + g0 * 0.587 + b0 * 0.114) < 128;
+                                    
+                                    for (let i = 0; i < data.length; i += 4) {
+                                      const r = data[i];
+                                      const g = data[i+1];
+                                      const b = data[i+2];
+                                      const a = data[i+3];
+                                      
+                                      if (isTransparent) {
+                                        // If already transparent, make any visible pixel white
+                                        if (a > 30) {
+                                          data[i] = 255;
+                                          data[i+1] = 255;
+                                          data[i+2] = 255;
+                                        }
+                                      } else if (isDarkBg) {
+                                        // Dark background: make dark pixels transparent, others white
+                                        const brightness = r * 0.299 + g * 0.587 + b * 0.114;
+                                        if (brightness < 60) {
+                                          data[i+3] = 0; // Make transparent
+                                        } else {
+                                          data[i] = 255;
+                                          data[i+1] = 255;
+                                          data[i+2] = 255;
+                                          data[i+3] = a; // Keep original alpha
+                                        }
+                                      } else {
+                                        // Light background: make light pixels transparent, others white
+                                        const brightness = r * 0.299 + g * 0.587 + b * 0.114;
+                                        if (brightness > 195) {
+                                          data[i+3] = 0; // Make transparent
+                                        } else {
+                                          data[i] = 255;
+                                          data[i+1] = 255;
+                                          data[i+2] = 255;
+                                          data[i+3] = a; // Keep original alpha
+                                        }
+                                      }
+                                    }
+                                    ctx.putImageData(imageData, 0, 0);
+                                    const processedBase64 = canvas.toDataURL('image/png');
+                                    setSettings({ ...settings, brand_logo: processedBase64 });
+                                  }
+                                };
+                                img.onerror = () => {
+                                  setSettings({ ...settings, brand_logo: originalBase64 });
+                                };
                               };
                               reader.readAsDataURL(file);
                             }
