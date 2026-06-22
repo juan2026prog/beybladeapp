@@ -31,7 +31,7 @@ import { JuecesTab } from '../components/dashboard/JuecesTab';
 import { ClasificacionesTab } from '../components/dashboard/ClasificacionesTab';
 import { ComunicacionesTab } from '../components/dashboard/ComunicacionesTab';
 import { OrganizadorStatsTab } from '../components/dashboard/OrganizadorStatsTab';
-import { HasbroReadyDashboard } from '../components/dashboard/HasbroReadyDashboard';
+// HasbroReadyDashboard removed per user request
 
 export const AdminDashboard: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<any>({ id: 'usr-visitor', role: 'Visitante', email: '' });
@@ -40,7 +40,7 @@ export const AdminDashboard: React.FC = () => {
 
   // Tab states
   const [activeSuperTab, setActiveSuperTab] = useState<'analytics' | 'modules' | 'retail' | 'settings' | 'products'>('analytics');
-  const [activeDistributorTab, setActiveDistributorTab] = useState<'certifications' | 'stats' | 'retail' | 'seasons' | 'hasbro'>('certifications');
+  const [activeDistributorTab, setActiveDistributorTab] = useState<'certifications' | 'stats' | 'retail' | 'seasons'>('certifications');
 
   // Hero Banners and Settings states
   const [banners, setBanners] = useState<any[]>([]);
@@ -100,7 +100,7 @@ export const AdminDashboard: React.FC = () => {
   const [storeStocks, setStoreStocks] = useState<(StoreStock & { productName: string })[]>([]);
 
   // Organizer states
-  const [organizerTab, setOrganizerTab] = useState<'tournaments' | 'journeys' | 'seasons' | 'stats' | 'hasbro'>('tournaments');
+  const [organizerTab, setOrganizerTab] = useState<'tournaments' | 'journeys' | 'seasons' | 'stats'>('tournaments');
   const [isCreatingTournament, setIsCreatingTournament] = useState(false);
   const [newTourName, setNewTourName] = useState('');
   const [newTourLeague, setNewTourLeague] = useState<'Junior' | 'Open' | 'Ambas'>('Open');
@@ -2858,18 +2858,7 @@ export const AdminDashboard: React.FC = () => {
                 <Package className="h-4 w-4" /> Retail País
               </span>
             </button>
-            <button
-              onClick={() => setActiveDistributorTab('hasbro')}
-              className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
-                activeDistributorTab === 'hasbro'
-                  ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
-                  : 'border-transparent text-gray-400 hover:text-white'
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <BarChart2 className="h-4 w-4" /> Hasbro Corporate
-              </span>
-            </button>
+
           </div>
 
           {/* Tab 1: Certifications & Validation */}
@@ -3627,9 +3616,7 @@ export const AdminDashboard: React.FC = () => {
             </div>
           )}
 
-          {activeDistributorTab === 'hasbro' && (
-            <HasbroReadyDashboard currentUser={currentUser} />
-          )}
+
         </div>
       )}
 
@@ -3682,7 +3669,7 @@ export const AdminDashboard: React.FC = () => {
                   organizerTab === 'tournaments' ? 'text-white border-b-2 border-beyblade-electricCyan pb-1' : 'text-gray-500 hover:text-white'
                 }`}
               >
-                Torneos Competitivos
+                Torneos
               </button>
               <button
                 type="button"
@@ -3691,7 +3678,7 @@ export const AdminDashboard: React.FC = () => {
                   organizerTab === 'seasons' ? 'text-white border-b-2 border-beyblade-electricCyan pb-1' : 'text-gray-500 hover:text-white'
                 }`}
               >
-                Temporadas y Ligas
+                Ligas
               </button>
               <button
                 type="button"
@@ -3700,7 +3687,7 @@ export const AdminDashboard: React.FC = () => {
                   organizerTab === 'journeys' ? 'text-white border-b-2 border-beyblade-electricCyan pb-1' : 'text-gray-500 hover:text-white'
                 }`}
               >
-                Jornadas Piloto
+                Jornadas
               </button>
               <button
                 type="button"
@@ -3711,15 +3698,7 @@ export const AdminDashboard: React.FC = () => {
               >
                 Estadísticas
               </button>
-              <button
-                type="button"
-                onClick={() => setOrganizerTab('hasbro')}
-                className={`text-lg font-black uppercase tracking-wide transition-all ${
-                  organizerTab === 'hasbro' ? 'text-white border-b-2 border-beyblade-electricCyan pb-1' : 'text-gray-500 hover:text-white'
-                }`}
-              >
-                Hasbro Corporate
-              </button>
+
             </div>
             
             {organizerTab === 'tournaments' ? (
@@ -4819,9 +4798,7 @@ export const AdminDashboard: React.FC = () => {
             <OrganizadorStatsTab currentUser={currentUser} />
           )}
 
-          {organizerTab === 'hasbro' && (
-            <HasbroReadyDashboard currentUser={currentUser} />
-          )}
+
         </div>
       )}
 
