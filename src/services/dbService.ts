@@ -155,6 +155,10 @@ export interface Tournament {
   season_id?: string;
   max_players?: number;
   waitlist_enabled?: boolean;
+  qualifies_regional?: boolean;
+  qualifies_nacional?: boolean;
+  qualifies_latam?: boolean;
+  qualifies_top_x?: number;
 }
 
 export interface Registration {
@@ -163,6 +167,14 @@ export interface Registration {
   player_id: string;
   checked_in: boolean;
   player_name?: string;
+  created_at?: string;
+  check_in_method?: string;
+  check_in_timestamp?: string;
+  check_in_by?: string;
+  confirmed_status?: 'pendiente' | 'confirmado' | 'rechazado';
+  player_bey_id?: string;
+  player_league_id?: 'Junior' | 'Open';
+  player_email?: string;
 }
 
 export interface TournamentResult {
@@ -605,6 +617,22 @@ export class DbService {
     if (error) throw error;
   }
 
+  public static async updateTournamentQualifiers(
+    tournamentId: string,
+    qualifiers: {
+      qualifies_regional: boolean;
+      qualifies_nacional: boolean;
+      qualifies_latam: boolean;
+      qualifies_top_x: number;
+    }
+  ): Promise<void> {
+    const { error } = await supabase
+      .from('tournaments')
+      .update(qualifiers)
+      .eq('id', tournamentId);
+    if (error) throw error;
+  }
+
   public static async deleteTournament(id: string): Promise<void> {
     const { error } = await supabase.from('tournaments').delete().eq('id', id);
     if (error) throw error;
@@ -690,13 +718,36 @@ export class DbService {
     const { error: delErr } = await supabase.from('tournament_results').delete().eq('tournament_id', tournamentId);
     if (delErr) throw delErr;
 
-    // 2. Build rows
+    // 2. Fetch season points configuration
+    const { data: tour } = await supabase.from('tournaments').select('season_id').eq('id', tournamentId).single();
+    let pointsFirst = 5;
+    let pointsSecond = 4;
+    let pointsThird = 3;
+    let pointsFourth = 2;
+    let pointsParticipation = 1;
+
+    if (tour?.season_id) {
+      const { data: season } = await supabase
+        .from('seasons')
+        .select('points_first, points_second, points_third, points_fourth, points_participation')
+        .eq('id', tour.season_id)
+        .maybeSingle();
+      if (season) {
+        pointsFirst = season.points_first ?? 5;
+        pointsSecond = season.points_second ?? 4;
+        pointsThird = season.points_third ?? 3;
+        pointsFourth = season.points_fourth ?? 2;
+        pointsParticipation = season.points_participation ?? 1;
+      }
+    }
+
+    // 3. Build rows using points from season config
     const resultsData = placements.map(p => {
-      let points = 1;
-      if (p.position === 1) points = 5;
-      else if (p.position === 2) points = 4;
-      else if (p.position === 3) points = 3;
-      else if (p.position === 4) points = 2;
+      let points = pointsParticipation;
+      if (p.position === 1) points = pointsFirst;
+      else if (p.position === 2) points = pointsSecond;
+      else if (p.position === 3) points = pointsThird;
+      else if (p.position === 4) points = pointsFourth;
 
       return {
         tournament_id: tournamentId,
@@ -707,11 +758,11 @@ export class DbService {
       };
     });
 
-    // 3. Insert new ones
+    // 4. Insert new ones
     const { error: insErr } = await supabase.from('tournament_results').insert(resultsData);
     if (insErr) throw insErr;
 
-    // 4. Update tournament status to finished
+    // 5. Update tournament status to finished
     await this.updateTournamentStatus(tournamentId, 'finalizado');
   }
 
@@ -1638,6 +1689,11 @@ export class DbService {
     return bracket;
   }
 
+  public static async updateBracketMatchStatus(matchId: string, status: 'pending' | 'in_progress' | 'completed'): Promise<void> {
+    const { error } = await supabase.from('bracket_matches').update({ status }).eq('id', matchId);
+    if (error) throw error;
+  }
+
   public static async submitMatchResult(matchId: string, winnerId: string, p1Score: number, p2Score: number): Promise<void> {
     const { data: match, error: fetchErr } = await supabase
       .from('bracket_matches')
@@ -1672,6 +1728,274 @@ export class DbService {
         .eq('id', match.bracket_id);
     }
   }
+
+  // -------------------------------------------------------------
+  // ORGANIZER PRO 4.0 METHODS
+  // -------------------------------------------------------------
+
+  public static async updateSeasonPoints(seasonId: string, points: {
+    points_first: number;
+    points_second: number;
+    points_third: number;
+    points_fourth: number;
+    points_participation: number;
+  }): Promise<void> {
+    const { error } = await supabase.from('seasons').update(points).eq('id', seasonId);
+    if (error) throw error;
+  }
+
+  public static async getTournamentTables(tournamentId: string): Promise<TournamentTable[]> {
+    const { data, error } = await supabase
+      .from('tournament_tables')
+      .select('*, bracket_matches(*), profiles(*)')
+      .eq('tournament_id', tournamentId)
+      .order('table_number', { ascending: true });
+
+    if (error) throw error;
+
+    const enrichedTables: TournamentTable[] = [];
+    for (const t of (data || [])) {
+      let player1Name = '';
+      let player2Name = '';
+      let roundNumber = undefined;
+      let matchNumber = undefined;
+
+      if (t.bracket_matches) {
+        roundNumber = t.bracket_matches.round_number;
+        matchNumber = t.bracket_matches.match_number;
+        
+        if (t.bracket_matches.player1_id) {
+          const { data: p1 } = await supabase.from('players').select('first_name, last_name').eq('id', t.bracket_matches.player1_id).maybeSingle();
+          if (p1) player1Name = `${p1.first_name} ${p1.last_name}`;
+        }
+        if (t.bracket_matches.player2_id) {
+          const { data: p2 } = await supabase.from('players').select('first_name, last_name').eq('id', t.bracket_matches.player2_id).maybeSingle();
+          if (p2) player2Name = `${p2.first_name} ${p2.last_name}`;
+        }
+      }
+
+      let judgeName = '';
+      if (t.profiles) {
+        const { data: jp } = await supabase.from('judges').select('*, profiles(name)').eq('id', t.profiles.id).maybeSingle();
+        if (jp && jp.profiles) {
+          judgeName = (jp.profiles as any).name;
+        } else {
+          judgeName = t.profiles.name || t.profiles.email || 'Juez';
+        }
+      }
+
+      enrichedTables.push({
+        id: t.id,
+        tournament_id: t.tournament_id,
+        table_number: t.table_number,
+        match_id: t.match_id,
+        judge_id: t.judge_id,
+        status: t.status,
+        created_at: t.created_at,
+        updated_at: t.updated_at,
+        player1_name: player1Name,
+        player2_name: player2Name,
+        judge_name: judgeName,
+        round_number: roundNumber,
+        match_number: matchNumber
+      });
+    }
+
+    return enrichedTables;
+  }
+
+  public static async updateTournamentTableStatus(
+    tableId: string,
+    status: 'libre' | 'en_combate' | 'finalizada',
+    matchId?: string | null
+  ): Promise<void> {
+    const updateObj: any = { status, updated_at: new Date().toISOString() };
+    if (matchId !== undefined) {
+      updateObj.match_id = matchId;
+    }
+    const { error } = await supabase.from('tournament_tables').update(updateObj).eq('id', tableId);
+    if (error) throw error;
+  }
+
+  public static async assignMatchToTable(
+    tableId: string,
+    matchId: string | null,
+    judgeId: string | null
+  ): Promise<void> {
+    const { error } = await supabase
+      .from('tournament_tables')
+      .update({
+        match_id: matchId,
+        judge_id: judgeId,
+        status: matchId ? 'en_combate' : 'libre',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', tableId);
+
+    if (error) throw error;
+  }
+
+  public static async initializeTournamentTables(tournamentId: string): Promise<void> {
+    for (let i = 1; i <= 5; i++) {
+      const { data, error: checkErr } = await supabase
+        .from('tournament_tables')
+        .select('id')
+        .eq('tournament_id', tournamentId)
+        .eq('table_number', i)
+        .maybeSingle();
+
+      if (!data && !checkErr) {
+        await supabase.from('tournament_tables').insert({
+          tournament_id: tournamentId,
+          table_number: i,
+          status: 'libre'
+        });
+      }
+    }
+  }
+
+  public static async getAuditLogs(tournamentId: string): Promise<AuditLog[]> {
+    const { data, error } = await supabase
+      .from('audit_logs')
+      .select('*, profiles(email, id)')
+      .eq('tournament_id', tournamentId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).map(log => {
+      let performedByName = 'Sistema';
+      if (log.profiles) {
+        performedByName = log.profiles.email || 'Organizador';
+      }
+      return {
+        id: log.id,
+        tournament_id: log.tournament_id,
+        action: log.action,
+        details: log.details,
+        performed_by: log.performed_by,
+        performed_by_name: performedByName,
+        created_at: log.created_at
+      };
+    });
+  }
+
+  public static async addAuditLog(
+    tournamentId: string | null,
+    action: string,
+    details: string,
+    performedBy?: string
+  ): Promise<void> {
+    const { error } = await supabase.from('audit_logs').insert({
+      tournament_id: tournamentId,
+      action,
+      details,
+      performed_by: performedBy || null
+    });
+    if (error) {
+      console.error('Failed to insert audit log:', error);
+    }
+  }
+
+  public static async updateRegistrationConfirmedStatus(
+    registrationId: string,
+    status: 'pendiente' | 'confirmado' | 'rechazado'
+  ): Promise<void> {
+    const { data: reg, error: fetchErr } = await supabase
+      .from('tournament_registrations')
+      .select('tournament_id, player_id')
+      .eq('id', registrationId)
+      .single();
+
+    if (fetchErr || !reg) throw new Error('Inscripción no encontrada.');
+
+    const { error } = await supabase
+      .from('tournament_registrations')
+      .update({ confirmed_status: status })
+      .eq('id', registrationId);
+
+    if (error) throw error;
+
+    await supabase.from('attendance_confirmations').upsert({
+      tournament_id: reg.tournament_id,
+      player_id: reg.player_id,
+      confirmed: status === 'confirmado' ? true : status === 'rechazado' ? false : null,
+      confirmed_at: new Date().toISOString()
+    }, { onConflict: 'tournament_id,player_id' });
+
+    if (status === 'rechazado') {
+      const { data: tour } = await supabase
+        .from('tournaments')
+        .select('slots_available, waitlist_enabled')
+        .eq('id', reg.tournament_id)
+        .single();
+
+      if (tour) {
+        await supabase
+          .from('tournaments')
+          .update({ slots_available: tour.slots_available + 1 })
+          .eq('id', reg.tournament_id);
+
+        if (tour.waitlist_enabled) {
+          await this.promoteFromWaitlist(reg.tournament_id);
+        }
+      }
+    }
+  }
+
+  public static async sendMassAnnouncement(
+    target: 'todos' | 'junior' | 'open' | 'participantes',
+    title: string,
+    message: string,
+    channel: 'in_app' | 'push' | 'whatsapp' | 'todos_canales',
+    tournamentId?: string,
+    countryId?: string
+  ): Promise<number> {
+    let playerIds: string[] = [];
+
+    if (target === 'participantes' && tournamentId) {
+      const { data } = await supabase
+        .from('tournament_registrations')
+        .select('player_id')
+        .eq('tournament_id', tournamentId);
+      playerIds = (data || []).map(r => r.player_id);
+    } else {
+      let query = supabase.from('players').select('id, league_id');
+      if (countryId) {
+        query = query.eq('country_id', countryId);
+      }
+      const { data } = await query;
+      const allPlayers = data || [];
+
+      if (target === 'todos') {
+        playerIds = allPlayers.map(p => p.id);
+      } else if (target === 'junior') {
+        playerIds = allPlayers.filter(p => p.league_id === 'Junior').map(p => p.id);
+      } else if (target === 'open') {
+        playerIds = allPlayers.filter(p => p.league_id === 'Open').map(p => p.id);
+      }
+    }
+
+    if (playerIds.length === 0) return 0;
+
+    const { NotificationService } = await import('./notificationService');
+    let count = 0;
+
+    for (const pId of playerIds) {
+      try {
+        await NotificationService.notifyUser(pId, 'mass_announcement' as any, {
+          title,
+          message,
+          url: tournamentId ? `/tournaments` : `/`
+        });
+        count++;
+      } catch (err) {
+        console.error(`Error sending mass announcement to player ${pId}:`, err);
+      }
+    }
+
+    return count;
+  }
 }
 
 export interface Season {
@@ -1684,6 +2008,11 @@ export interface Season {
   description?: string;
   status: 'draft' | 'active' | 'completed';
   created_at?: string;
+  points_first?: number;
+  points_second?: number;
+  points_third?: number;
+  points_fourth?: number;
+  points_participation?: number;
 }
 
 export interface Bracket {
@@ -1708,7 +2037,7 @@ export interface BracketMatch {
   bye_assigned: boolean;
   next_match_id?: string | null;
   next_match_player_slot?: 1 | 2 | null;
-  status: 'pending' | 'completed';
+  status: 'pending' | 'in_progress' | 'completed';
   created_at?: string;
   player1_name?: string;
   player2_name?: string;
@@ -1798,3 +2127,29 @@ export interface Journey {
   created_at?: string;
 }
 
+export interface TournamentTable {
+  id?: string;
+  tournament_id: string;
+  table_number: number;
+  match_id?: string | null;
+  judge_id?: string | null;
+  status: 'libre' | 'en_combate' | 'finalizada';
+  created_at?: string;
+  updated_at?: string;
+  // Enriched fields for UI
+  player1_name?: string;
+  player2_name?: string;
+  judge_name?: string;
+  round_number?: number;
+  match_number?: number;
+}
+
+export interface AuditLog {
+  id?: string;
+  tournament_id?: string | null;
+  action: string;
+  details?: string | null;
+  performed_by?: string | null;
+  performed_by_name?: string;
+  created_at?: string;
+}

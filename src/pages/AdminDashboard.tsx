@@ -4,7 +4,7 @@ import {
   Trophy, Settings, CheckSquare, Camera,
   TrendingUp, BarChart2, Flag, Package, Map, Users,
   ShoppingBag, MapPin, AlertCircle, Film, Trash2,
-  Calendar, Printer, Loader2, List
+  Calendar, Printer, Loader2, List, LayoutGrid, Send
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabaseClient';
@@ -20,6 +20,19 @@ import type {
 import { LocationAutocomplete } from '../components/LocationAutocomplete';
 import type { NormalizedLocation } from '../services/geocodingService';
 
+// Module subcomponents for Phase 4.0
+import { ProximoEvento } from '../components/dashboard/ProximoEvento';
+import { InscripcionesTab } from '../components/dashboard/InscripcionesTab';
+import { ConfirmacionesTab } from '../components/dashboard/ConfirmacionesTab';
+import { WaitlistTab } from '../components/dashboard/WaitlistTab';
+import { MatchesTab } from '../components/dashboard/MatchesTab';
+import { MesasTab } from '../components/dashboard/MesasTab';
+import { JuecesTab } from '../components/dashboard/JuecesTab';
+import { ClasificacionesTab } from '../components/dashboard/ClasificacionesTab';
+import { ComunicacionesTab } from '../components/dashboard/ComunicacionesTab';
+import { OrganizadorStatsTab } from '../components/dashboard/OrganizadorStatsTab';
+import { HasbroReadyDashboard } from '../components/dashboard/HasbroReadyDashboard';
+
 export const AdminDashboard: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<any>({ id: 'usr-visitor', role: 'Visitante', email: '' });
   const [modules, setModules] = useState<ModuleConfig[]>([]);
@@ -27,7 +40,7 @@ export const AdminDashboard: React.FC = () => {
 
   // Tab states
   const [activeSuperTab, setActiveSuperTab] = useState<'analytics' | 'modules' | 'retail' | 'settings' | 'products'>('analytics');
-  const [activeDistributorTab, setActiveDistributorTab] = useState<'certifications' | 'stats' | 'retail' | 'seasons'>('certifications');
+  const [activeDistributorTab, setActiveDistributorTab] = useState<'certifications' | 'stats' | 'retail' | 'seasons' | 'hasbro'>('certifications');
 
   // Hero Banners and Settings states
   const [banners, setBanners] = useState<any[]>([]);
@@ -87,7 +100,7 @@ export const AdminDashboard: React.FC = () => {
   const [storeStocks, setStoreStocks] = useState<(StoreStock & { productName: string })[]>([]);
 
   // Organizer states
-  const [organizerTab, setOrganizerTab] = useState<'tournaments' | 'journeys' | 'seasons'>('tournaments');
+  const [organizerTab, setOrganizerTab] = useState<'tournaments' | 'journeys' | 'seasons' | 'stats' | 'hasbro'>('tournaments');
   const [isCreatingTournament, setIsCreatingTournament] = useState(false);
   const [newTourName, setNewTourName] = useState('');
   const [newTourLeague, setNewTourLeague] = useState<'Junior' | 'Open' | 'Ambas'>('Open');
@@ -146,7 +159,19 @@ export const AdminDashboard: React.FC = () => {
   const [selectedMatchForScore, setSelectedMatchForScore] = useState<BracketMatch | null>(null);
   const [scoreP1, setScoreP1] = useState(0);
   const [scoreP2, setScoreP2] = useState(0);
-  const [organizerTournamentsTab, setOrganizerTournamentsTab] = useState<'acreditacion' | 'brackets'>('acreditacion');
+  const [organizerTournamentsTab, setOrganizerTournamentsTab] = useState<'inscripciones' | 'confirmaciones' | 'waitlist' | 'matches' | 'mesas' | 'jueces' | 'clasificaciones' | 'comunicaciones'>('inscripciones');
+
+  // Point configuration states
+  const [pointsFirst, setPointsFirst] = useState(5);
+  const [pointsSecond, setPointsSecond] = useState(4);
+  const [pointsThird, setPointsThird] = useState(3);
+  const [pointsFourth, setPointsFourth] = useState(2);
+  const [pointsParticipation, setPointsParticipation] = useState(1);
+
+  // Next tournament states
+  const [nextTour, setNextTour] = useState<Tournament | null>(null);
+  const [nextTourRegistrations, setNextTourRegistrations] = useState<Registration[]>([]);
+  const [nextTourWaitlistCount, setNextTourWaitlistCount] = useState(0);
 
   const [feedback, setFeedback] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -423,6 +448,34 @@ export const AdminDashboard: React.FC = () => {
       setSeasons(seasonsList);
     } catch (err) {
       console.error('Error fetching seasons:', err);
+    }
+
+    // Load upcoming next tournament for active quick actions banner
+    try {
+      let candidateTours = allTours.filter(t => t.status !== 'finalizado');
+      if (userProfile.role === 'Distribuidor País') {
+        candidateTours = candidateTours.filter(t => t.country_id === userProfile.country_id);
+      } else if (userProfile.role === 'Organizador') {
+        candidateTours = candidateTours.filter(t => t.organizer_id === userProfile.id);
+      }
+      candidateTours.sort((a, b) => {
+        const dateA = new Date(`${a.date}T${a.time || '00:00'}`);
+        const dateB = new Date(`${b.date}T${b.time || '00:00'}`);
+        return dateA.getTime() - dateB.getTime();
+      });
+      const nextT = candidateTours.length > 0 ? candidateTours[0] : null;
+      setNextTour(nextT);
+      if (nextT) {
+        const nextRegs = await DbService.getTournamentRegistrations(nextT.id);
+        setNextTourRegistrations(nextRegs);
+        const waitlist = await DbService.getWaitlist(nextT.id);
+        setNextTourWaitlistCount(waitlist.length);
+      } else {
+        setNextTourRegistrations([]);
+        setNextTourWaitlistCount(0);
+      }
+    } catch (err) {
+      console.error('Error loading next tournament:', err);
     }
   };
 
@@ -906,6 +959,12 @@ export const AdminDashboard: React.FC = () => {
 
       const regs = await DbService.getTournamentRegistrations(tourId);
       setManageRegistrations(regs);
+
+      // Sync the next tournament details if it matches the current nextTour
+      if (nextTour && nextTour.id === tourId) {
+        setNextTourRegistrations(regs);
+        setNextTourWaitlistCount(waitlist.length);
+      }
     } catch (err) {
       console.error('Error refreshing competitive data:', err);
     }
@@ -2799,6 +2858,18 @@ export const AdminDashboard: React.FC = () => {
                 <Package className="h-4 w-4" /> Retail País
               </span>
             </button>
+            <button
+              onClick={() => setActiveDistributorTab('hasbro')}
+              className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
+                activeDistributorTab === 'hasbro'
+                  ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <BarChart2 className="h-4 w-4" /> Hasbro Corporate
+              </span>
+            </button>
           </div>
 
           {/* Tab 1: Certifications & Validation */}
@@ -2981,6 +3052,61 @@ export const AdminDashboard: React.FC = () => {
                         className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
                       />
                     </div>
+                    <div className="border-t border-white/5 pt-3 mt-1 space-y-2 text-left">
+                      <label className="text-[9.5px] text-beyblade-electricCyan font-black uppercase tracking-wider font-esports block">Distribución de Puntos</label>
+                      <div className="grid grid-cols-5 gap-1.5 text-center">
+                        <div className="space-y-1">
+                          <label className="text-[8px] text-gray-500 font-bold block">1º</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={pointsFirst}
+                            onChange={(e) => setPointsFirst(Number(e.target.value))}
+                            className="w-full bg-beyblade-darker border border-white/10 rounded-lg py-1 text-center font-bold text-white text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[8px] text-gray-500 font-bold block">2º</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={pointsSecond}
+                            onChange={(e) => setPointsSecond(Number(e.target.value))}
+                            className="w-full bg-beyblade-darker border border-white/10 rounded-lg py-1 text-center font-bold text-white text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[8px] text-gray-500 font-bold block">3º</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={pointsThird}
+                            onChange={(e) => setPointsThird(Number(e.target.value))}
+                            className="w-full bg-beyblade-darker border border-white/10 rounded-lg py-1 text-center font-bold text-white text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[8px] text-gray-500 font-bold block">4º</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={pointsFourth}
+                            onChange={(e) => setPointsFourth(Number(e.target.value))}
+                            className="w-full bg-beyblade-darker border border-white/10 rounded-lg py-1 text-center font-bold text-white text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[8px] text-gray-500 font-bold block">Part.</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={pointsParticipation}
+                            onChange={(e) => setPointsParticipation(Number(e.target.value))}
+                            className="w-full bg-beyblade-darker border border-white/10 rounded-lg py-1 text-center font-bold text-white text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
                     <button
                       type="button"
                       onClick={async () => {
@@ -2995,13 +3121,23 @@ export const AdminDashboard: React.FC = () => {
                             start_date: newSeasonStartDate,
                             end_date: newSeasonEndDate || undefined,
                             description: newSeasonDesc,
-                            status: 'draft'
+                            status: 'draft',
+                            points_first: pointsFirst,
+                            points_second: pointsSecond,
+                            points_third: pointsThird,
+                            points_fourth: pointsFourth,
+                            points_participation: pointsParticipation
                           });
                           setFeedback('¡Temporada creada como Borrador con éxito!');
                           setNewSeasonName('');
                           setNewSeasonStartDate('');
                           setNewSeasonEndDate('');
                           setNewSeasonDesc('');
+                          setPointsFirst(5);
+                          setPointsSecond(4);
+                          setPointsThird(3);
+                          setPointsFourth(2);
+                          setPointsParticipation(1);
                           loadData();
                           setTimeout(() => setFeedback(''), 3000);
                         } catch (err: any) {
@@ -3490,6 +3626,10 @@ export const AdminDashboard: React.FC = () => {
 
             </div>
           )}
+
+          {activeDistributorTab === 'hasbro' && (
+            <HasbroReadyDashboard currentUser={currentUser} />
+          )}
         </div>
       )}
 
@@ -3497,10 +3637,44 @@ export const AdminDashboard: React.FC = () => {
       {/* ORGANIZADOR CERTIFICADO PANEL */}
       {/* ========================================================================= */}
       {currentUser.role === 'Organizador' && (
-        <div className="space-y-8">
-          
+        <div className="space-y-8 animate-fade-in">
+          {/* Quick-action upcoming tournament banner */}
+          <ProximoEvento
+            tournament={nextTour}
+            registrations={nextTourRegistrations}
+            waitlistCount={nextTourWaitlistCount}
+            onViewTournament={() => {
+              if (nextTour) {
+                handleSelectManageTournament(nextTour);
+                setOrganizerTab('tournaments');
+              }
+            }}
+            onOpenQRCheckIn={() => {
+              if (nextTour) {
+                handleSelectManageTournament(nextTour);
+                setOrganizerTab('tournaments');
+                setOrganizerTournamentsTab('inscripciones');
+                setIsScanningQR(true);
+              }
+            }}
+            onViewBracket={() => {
+              if (nextTour) {
+                handleSelectManageTournament(nextTour);
+                setOrganizerTab('tournaments');
+                setOrganizerTournamentsTab('matches');
+              }
+            }}
+            onSendCommunication={() => {
+              if (nextTour) {
+                handleSelectManageTournament(nextTour);
+                setOrganizerTab('tournaments');
+                setOrganizerTournamentsTab('comunicaciones');
+              }
+            }}
+          />
+
           <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-white/5 pb-4">
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-4">
               <button
                 type="button"
                 onClick={() => setOrganizerTab('tournaments')}
@@ -3527,6 +3701,24 @@ export const AdminDashboard: React.FC = () => {
                 }`}
               >
                 Jornadas Piloto
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrganizerTab('stats')}
+                className={`text-lg font-black uppercase tracking-wide transition-all ${
+                  organizerTab === 'stats' ? 'text-white border-b-2 border-beyblade-electricCyan pb-1' : 'text-gray-500 hover:text-white'
+                }`}
+              >
+                Estadísticas
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrganizerTab('hasbro')}
+                className={`text-lg font-black uppercase tracking-wide transition-all ${
+                  organizerTab === 'hasbro' ? 'text-white border-b-2 border-beyblade-electricCyan pb-1' : 'text-gray-500 hover:text-white'
+                }`}
+              >
+                Hasbro Corporate
               </button>
             </div>
             
@@ -3943,377 +4135,189 @@ export const AdminDashboard: React.FC = () => {
                   )}
 
                   {/* Sub-tab selection within tournament details */}
-                  <div className="flex border-b border-white/5 pb-2">
-                    <button
-                      type="button"
-                      onClick={() => setOrganizerTournamentsTab('acreditacion')}
-                      className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
-                        organizerTournamentsTab === 'acreditacion'
-                          ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
-                          : 'border-transparent text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <Users className="h-4 w-4" /> Acreditación e Inscripción
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOrganizerTournamentsTab('brackets')}
-                      className={`px-4 py-2 font-bold text-xs uppercase border-b-2 transition-all ${
-                        organizerTournamentsTab === 'brackets'
-                          ? 'border-beyblade-electricCyan text-beyblade-electricCyan font-black'
-                          : 'border-transparent text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <Trophy className="h-4 w-4" /> Fase Eliminatoria (Brackets)
-                      </span>
-                    </button>
+                  <div className="flex flex-wrap gap-2 border-b border-white/5 pb-3">
+                    {[
+                      { id: 'inscripciones', label: 'Inscripciones', icon: Users },
+                      { id: 'confirmaciones', label: 'Confirmaciones', icon: CheckSquare },
+                      { id: 'waitlist', label: 'Waitlist', icon: List },
+                      { id: 'matches', label: 'Combates / Brackets', icon: Trophy },
+                      { id: 'mesas', label: 'Mesas (1-5)', icon: LayoutGrid },
+                      { id: 'jueces', label: 'Jueces', icon: Shield },
+                      { id: 'clasificaciones', label: 'Clasificaciones', icon: Flag },
+                      { id: 'comunicaciones', label: 'Comunicaciones', icon: Send }
+                    ].map(tab => {
+                      const Icon = tab.icon;
+                      const isActive = organizerTournamentsTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setOrganizerTournamentsTab(tab.id as any)}
+                          className={`px-3 py-1.5 rounded-xl font-bold text-[10px] uppercase transition-all flex items-center gap-1.5 border ${
+                            isActive
+                              ? 'bg-beyblade-electricCyan/15 border-beyblade-electricCyan text-beyblade-electricCyan font-black shadow-[0_0_10px_rgba(0,240,255,0.15)]'
+                              : 'bg-transparent border-white/5 text-gray-400 hover:text-white hover:border-white/10'
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          {tab.label}
+                        </button>
+                      );
+                    })}
                   </div>
 
-                  {/* Sub-tab 1: Acreditacion e Inscripcion */}
-                  {organizerTournamentsTab === 'acreditacion' && (
-                    <div className="space-y-6 animate-fade-in text-left">
-                      {/* Attendance Confirmations list */}
-                      <div className="space-y-3">
-                        <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5">
-                          <CheckSquare className="h-4 w-4 text-beyblade-electricCyan" /> Confirmación de Asistencia (48hs Antes)
-                        </h4>
-                        <p className="text-[10px] text-gray-500">
-                          Revisa la lista de confirmados y gestiona cancelaciones. Si un jugador declina asistencia, se liberará su plaza para la lista de espera.
-                        </p>
-                        <div className="divide-y divide-white/5 bg-beyblade-dark rounded-xl border border-white/5 overflow-hidden text-xs max-h-48 overflow-y-auto no-scrollbar">
-                          {attendanceConfirmations.map((a) => (
-                            <div key={a.id} className="p-3 flex items-center justify-between">
-                              <div>
-                                <span className="font-bold text-white block">{a.player_name}</span>
-                                <span className={`text-[8.5px] font-black uppercase ${
-                                  a.confirmed === true ? 'text-emerald-400' :
-                                  a.confirmed === false ? 'text-beyblade-electricRed' : 'text-gray-500'
-                                }`}>
-                                  {a.confirmed === true ? 'Asistencia Confirmada' :
-                                   a.confirmed === false ? 'Cancelado / Liberado' : 'Pendiente de Respuesta'}
-                                </span>
-                              </div>
-                              {a.confirmed !== false && (
-                                <div className="flex gap-2">
-                                  {a.confirmed !== true && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleUpdateAttendanceConfirmation(a.player_id, true)}
-                                      className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white font-bold text-[9px] uppercase rounded transition-all"
-                                    >
-                                      Confirmar
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateAttendanceConfirmation(a.player_id, false)}
-                                    className="px-2.5 py-1 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed text-beyblade-electricRed hover:text-white font-bold text-[9px] uppercase rounded transition-all"
-                                  >
-                                    Declinar / Liberar
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                          {attendanceConfirmations.length === 0 && (
-                            <p className="text-[10px] text-gray-500 italic p-3 text-center">No hay confirmaciones de asistencia pendientes en este torneo.</p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Waitlist list */}
-                      <div className="space-y-3">
-                        <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5">
-                          <List className="h-4 w-4 text-beyblade-gold" /> Lista de Espera (Waitlist)
-                        </h4>
-                        <div className="divide-y divide-white/5 bg-beyblade-dark rounded-xl border border-white/5 overflow-hidden text-xs max-h-48 overflow-y-auto no-scrollbar">
-                          {waitlistEntries.map((w) => (
-                            <div key={w.id} className="p-3 flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="bg-white/5 px-2 py-0.5 rounded text-[10px] font-mono font-bold text-gray-400">#{w.position}</span>
-                                <span className="font-bold text-white">{w.player_name}</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  if (window.confirm(`¿Seguro que deseas remover a ${w.player_name} de la lista de espera?`)) {
-                                    await DbService.leaveWaitlist(selectedManageTour.id, w.player_id);
-                                    await refreshManageTournamentCompetitiveData(selectedManageTour.id);
-                                  }
-                                }}
-                                className="px-2 py-1 bg-beyblade-electricRed/10 hover:bg-beyblade-electricRed text-white font-bold text-[9px] uppercase rounded transition-all"
-                              >
-                                Remover
-                              </button>
-                            </div>
-                          ))}
-                          {waitlistEntries.length === 0 && (
-                            <p className="text-[10px] text-gray-500 italic p-3 text-center">La lista de espera está vacía.</p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Checked In Present Players list */}
-                      <div className="space-y-3">
-                        <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5">
-                          <CheckSquare className="h-4 w-4 text-emerald-400" /> Acreditación de Jugadores (Checked-in)
-                        </h4>
-                        <div className="divide-y divide-white/5 bg-beyblade-dark rounded-xl border border-white/5 overflow-hidden max-h-60 overflow-y-auto no-scrollbar">
-                          {manageRegistrations.map((r) => (
-                            <div key={r.id} className="p-3 flex items-center justify-between text-xs">
-                              <span className="font-bold text-white">{r.player_name}</span>
-                              <label className="flex items-center gap-2 cursor-pointer select-none text-gray-400">
-                                <input
-                                  type="checkbox"
-                                  checked={r.checked_in}
-                                  onChange={(e) => handleCheckInToggle(r.id, e.target.checked)}
-                                  className="rounded border-white/10 text-beyblade-electricCyan bg-beyblade-darker focus:ring-0"
-                                />
-                                Presente / Acreditado
-                              </label>
-                            </div>
-                          ))}
-                          {manageRegistrations.length === 0 && (
-                            <p className="text-[10px] text-gray-500 italic p-3 text-center">No hay jugadores inscriptos en este torneo.</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                  {/* Render tabs modular components */}
+                  {organizerTournamentsTab === 'inscripciones' && (
+                    <InscripcionesTab
+                      registrations={manageRegistrations}
+                      waitlistIds={waitlistEntries.map(w => w.player_id)}
+                      onApprove={async (regId) => {
+                        try {
+                          await DbService.updateRegistrationConfirmedStatus(regId, 'confirmado');
+                          await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+                          setFeedback('Inscripción aprobada / confirmada.');
+                          setTimeout(() => setFeedback(''), 3000);
+                        } catch (err: any) {
+                          setErrorMsg(err.message || 'Error al aprobar.');
+                        }
+                      }}
+                      onCancel={async (regId) => {
+                        try {
+                          await DbService.updateRegistrationConfirmedStatus(regId, 'rechazado');
+                          await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+                          setFeedback('Inscripción rechazada / cancelada.');
+                          setTimeout(() => setFeedback(''), 3000);
+                        } catch (err: any) {
+                          setErrorMsg(err.message || 'Error al rechazar.');
+                        }
+                      }}
+                      onMoveToWaitlist={async (playerId) => {
+                        try {
+                          await DbService.joinWaitlist(selectedManageTour.id, playerId);
+                          await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+                          setFeedback('Jugador movido a lista de espera.');
+                          setTimeout(() => setFeedback(''), 3000);
+                        } catch (err: any) {
+                          setErrorMsg(err.message || 'Error al mover a waitlist.');
+                        }
+                      }}
+                      onConfirmCheckIn={async (regId, checked) => {
+                        await handleCheckInToggle(regId, checked);
+                      }}
+                      onViewCareer={(playerId) => {
+                        window.open(`/profile/${playerId}`, '_blank');
+                      }}
+                    />
                   )}
 
-                  {/* Sub-tab 2: Brackets / Eliminatoria */}
-                  {organizerTournamentsTab === 'brackets' && (
-                    <div className="space-y-6 animate-fade-in text-left">
-                      {bracketLoading ? (
-                        <div className="text-center py-12 space-y-3">
-                          <Loader2 className="h-8 w-8 text-beyblade-electricCyan animate-spin mx-auto" />
-                          <p className="text-xs text-gray-400 font-bold">Procesando estructura eliminatoria...</p>
-                        </div>
-                      ) : activeBracket ? (
-                        <div className="space-y-6">
-                          {/* Active Bracket Details */}
-                          <div className="flex justify-between items-center bg-beyblade-dark/60 p-4 border border-white/5 rounded-2xl">
-                            <div>
-                              <span className="text-[9px] text-emerald-400 font-bold uppercase block">Fase Eliminatoria Activa</span>
-                              <h4 className="text-xs font-black text-white uppercase tracking-wider font-esports">Bracket de Eliminación Simple</h4>
-                            </div>
-                            <span className="text-[10px] text-gray-400 font-mono">Bracket ID: {activeBracket.id?.substring(0, 8)}</span>
-                          </div>
-
-                          {/* Bracket Matches Visual Tree Map */}
-                          <div className="overflow-x-auto pb-4 no-scrollbar">
-                            <div className="flex gap-8 min-w-[650px] items-stretch justify-start pt-2">
-                              {(() => {
-                                // Group matches by round
-                                const roundsMap: { [round: number]: BracketMatch[] } = {};
-                                bracketMatches.forEach(m => {
-                                  if (!roundsMap[m.round_number]) roundsMap[m.round_number] = [];
-                                  roundsMap[m.round_number].push(m);
-                                });
-
-                                const roundNumbers = Object.keys(roundsMap).map(Number).sort((a, b) => a - b);
-                                
-                                return roundNumbers.map((roundNum) => {
-                                  const matchesInRound = roundsMap[roundNum];
-                                  
-                                  // Formatting round name
-                                  let roundName = `Ronda ${roundNum}`;
-                                  if (roundNum === roundNumbers.length) roundName = 'Gran Final';
-                                  else if (roundNum === roundNumbers.length - 1) roundName = 'Semifinal';
-                                  else if (roundNum === roundNumbers.length - 2) roundName = 'Cuartos de Final';
-                                  else if (roundNum === roundNumbers.length - 3) roundName = 'Octavos de Final';
-
-                                  return (
-                                    <div key={roundNum} className="flex-1 flex flex-col justify-around gap-4 min-w-[200px]">
-                                      <div className="text-center pb-2 border-b border-white/5">
-                                        <span className="text-[9px] font-black uppercase text-beyblade-electricCyan font-esports tracking-widest">{roundName}</span>
-                                      </div>
-                                      
-                                      <div className="flex flex-col justify-around h-full gap-4">
-                                        {matchesInRound.map((m) => {
-                                          const isCompleted = m.status === 'completed';
-                                          const isSelected = selectedMatchForScore?.id === m.id;
-
-                                          return (
-                                            <div
-                                              key={m.id}
-                                              className={`bg-beyblade-darker/60 border rounded-2xl p-3 text-xs space-y-2 transition-all relative ${
-                                                isCompleted 
-                                                  ? 'border-white/5 opacity-80' 
-                                                  : isSelected
-                                                  ? 'border-beyblade-electricCyan ring-1 ring-beyblade-electricCyan'
-                                                  : 'border-beyblade-electricCyan/25 hover:border-beyblade-electricCyan/50 cursor-pointer'
-                                              }`}
-                                              onClick={() => {
-                                                if (!isCompleted && !m.bye_assigned && (m.player1_id || m.player2_id)) {
-                                                  setSelectedMatchForScore(m);
-                                                  setScoreP1(m.player1_score || 0);
-                                                  setScoreP2(m.player2_score || 0);
-                                                }
-                                              }}
-                                            >
-                                              {/* Player 1 Card slot */}
-                                              <div className="flex justify-between items-center">
-                                                <span className={`font-bold truncate max-w-[120px] ${
-                                                  isCompleted && m.winner_id === m.player1_id ? 'text-beyblade-electricCyan' : 'text-white'
-                                                }`}>
-                                                  {m.player1_name || 'Pendiente'}
-                                                </span>
-                                                <span className="font-mono font-black text-white">{m.player1_score}</span>
-                                              </div>
-
-                                              {/* Vs separator line */}
-                                              <div className="h-[1px] bg-white/5 w-full"></div>
-
-                                              {/* Player 2 Card slot */}
-                                              <div className="flex justify-between items-center">
-                                                {m.bye_assigned ? (
-                                                  <span className="text-emerald-400/80 font-black uppercase text-[8px] font-esports tracking-wide">
-                                                    [ BYE / Pase Directo ]
-                                                  </span>
-                                                ) : (
-                                                  <span className={`font-bold truncate max-w-[120px] ${
-                                                    isCompleted && m.winner_id === m.player2_id ? 'text-beyblade-electricCyan' : 'text-white'
-                                                  }`}>
-                                                    {m.player2_name || 'Pendiente'}
-                                                  </span>
-                                                )}
-                                                <span className="font-mono font-black text-white">
-                                                  {m.bye_assigned ? '-' : m.player2_score}
-                                                </span>
-                                              </div>
-
-                                              {/* Winner Badge */}
-                                              {isCompleted && m.winner_name && (
-                                                <div className="text-[8px] font-black uppercase text-emerald-400 font-esports pt-1 flex items-center gap-0.5">
-                                                  <Check className="h-3 w-3" /> Ganó {m.winner_name.split(' ')[0]}
-                                                </div>
-                                              )}
-
-                                              {/* Inline score editor */}
-                                              {isSelected && (
-                                                <div className="bg-beyblade-dark p-3.5 rounded-xl border border-white/5 space-y-2 mt-2" onClick={(e) => e.stopPropagation()}>
-                                                  <h5 className="text-[9px] font-black uppercase text-beyblade-electricCyan tracking-wider font-esports">Registrar Resultado</h5>
-                                                  <div className="grid grid-cols-2 gap-2 text-center text-xs">
-                                                    <div>
-                                                      <span className="text-[8px] text-gray-500 font-bold uppercase truncate block max-w-[80px]">{m.player1_name?.split(' ')[0]}</span>
-                                                      <input
-                                                        type="number"
-                                                        value={scoreP1}
-                                                        onChange={(e) => setScoreP1(Number(e.target.value))}
-                                                        className="w-12 bg-beyblade-darker border border-white/10 rounded px-1.5 py-1 text-center font-bold text-white mt-1"
-                                                      />
-                                                    </div>
-                                                    <div>
-                                                      <span className="text-[8px] text-gray-500 font-bold uppercase truncate block max-w-[80px]">{m.player2_name?.split(' ')[0]}</span>
-                                                      <input
-                                                        type="number"
-                                                        value={scoreP2}
-                                                        onChange={(e) => setScoreP2(Number(e.target.value))}
-                                                        className="w-12 bg-beyblade-darker border border-white/10 rounded px-1.5 py-1 text-center font-bold text-white mt-1"
-                                                      />
-                                                    </div>
-                                                  </div>
-                                                  <div className="flex gap-1.5 pt-1">
-                                                    <button
-                                                      type="button"
-                                                      onClick={async () => {
-                                                        const winId = scoreP1 > scoreP2 ? m.player1_id : m.player2_id;
-                                                        if (winId) {
-                                                          await handleSubmitBracketScore(m.id!, winId, scoreP1, scoreP2);
-                                                        } else {
-                                                          setErrorMsg('No se puede determinar un ganador. Empate no permitido.');
-                                                        }
-                                                      }}
-                                                      className="flex-1 py-1.5 bg-beyblade-electricCyan text-beyblade-darker font-black font-esports text-[8.5px] uppercase tracking-wider rounded"
-                                                    >
-                                                      Guardar
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => setSelectedMatchForScore(null)}
-                                                      className="px-2 py-1.5 bg-white/5 text-gray-400 font-bold text-[8.5px] uppercase rounded"
-                                                    >
-                                                      X
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              )}
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-                                  );
-                                });
-                              })()}
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-6">
-                          {/* Warning / Call to Action */}
-                          <div className="bg-beyblade-dark border border-white/5 rounded-3xl p-6 space-y-4 text-center">
-                            <Trophy className="h-10 w-10 text-beyblade-electricCyan mx-auto animate-pulse" />
-                            <h4 className="font-extrabold text-white text-sm uppercase">Llave de Brackets Eliminatorios sin Generar</h4>
-                            <p className="text-xs text-gray-400 max-w-md mx-auto leading-relaxed">
-                              Acredita a los jugadores presentes en la pestaña **"Acreditación e Inscripción"**. Una vez listos todos los checked-in, presiona el botón para realizar el sorteo automático de BYEs y generar el bracket eliminatorio oficial.
-                            </p>
-                            <button
-                              type="button"
-                              onClick={handleGenerateBracket}
-                              className="px-6 py-2.5 bg-beyblade-electricCyan hover:bg-beyblade-electricCyan/85 text-beyblade-darker font-black font-esports text-[10px] uppercase tracking-widest rounded-xl transition-all shadow-neon-cyan"
-                            >
-                              Generar Brackets y Sorteo BYEs
-                            </button>
-                          </div>
-
-                          {/* Fallback Legacy Manual Placements input */}
-                          <div className="border-t border-white/5 pt-6 space-y-4">
-                            <div className="flex flex-col gap-1">
-                              <h4 className="text-xs text-gray-400 font-bold uppercase flex items-center gap-1.5">
-                                <Settings className="h-4 w-4" /> Fallback: Carga Manual de Resultados (Legacy)
-                              </h4>
-                              <p className="text-[10px] text-gray-500">
-                                Utiliza esta sección si prefieres registrar las posiciones finales manualmente en lugar de generar un bracket interactivo.
-                              </p>
-                            </div>
-                            
-                            <div className="space-y-2 bg-beyblade-dark rounded-xl border border-white/5 p-4">
-                              {manageRegistrations.filter(r => r.checked_in).map(r => (
-                                <div key={r.id} className="flex justify-between items-center text-xs">
-                                  <span className="text-white font-bold">{r.player_name}</span>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[10px] text-gray-500 font-bold uppercase">Puesto:</span>
-                                    <input
-                                      type="number"
-                                      min="1"
-                                      value={placements[r.player_id] || ''}
-                                      onChange={(e) => setPlacements({ ...placements, [r.player_id]: Number(e.target.value) })}
-                                      className="w-16 bg-beyblade-darker border border-white/10 rounded-lg px-2 py-1 text-center font-bold text-white"
-                                    />
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={handleSavePlacements}
-                              className="w-full py-3 bg-beyblade-electricRed text-white font-extrabold text-xs uppercase rounded-xl shadow-neon-red hover:bg-beyblade-electricRed/80 transition-all"
-                            >
-                              Enviar Posiciones al Distribuidor
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                    </div>
+                  {organizerTournamentsTab === 'confirmaciones' && (
+                    <ConfirmacionesTab
+                      registrations={manageRegistrations}
+                      onSendRecordatorios={async () => {
+                        try {
+                          await DbService.sendMassAnnouncement(
+                            'participantes',
+                            'Recordatorio de Asistencia',
+                            `¡Recordatorio! Tu asistencia al torneo "${selectedManageTour.name}" requiere confirmación preventiva.`,
+                            'in_app',
+                            selectedManageTour.id
+                          );
+                          setFeedback('Recordatorios de asistencia enviados exitosamente.');
+                          setTimeout(() => setFeedback(''), 3000);
+                        } catch (err: any) {
+                          setErrorMsg(err.message || 'Error al enviar recordatorios.');
+                        }
+                      }}
+                      onUpdateConfirmationStatus={async (regId, status) => {
+                        try {
+                          await DbService.updateRegistrationConfirmedStatus(regId, status);
+                          await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+                          setFeedback('Estado de confirmación actualizado.');
+                          setTimeout(() => setFeedback(''), 3000);
+                        } catch (err: any) {
+                          setErrorMsg(err.message || 'Error al actualizar confirmación.');
+                        }
+                      }}
+                    />
                   )}
 
+                  {organizerTournamentsTab === 'waitlist' && (
+                    <WaitlistTab
+                      waitlistEntries={waitlistEntries}
+                      onPromote={async (playerId) => {
+                        try {
+                          await DbService.promoteFromWaitlist(selectedManageTour.id);
+                          await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+                          setFeedback('Jugador promovido desde la lista de espera.');
+                          setTimeout(() => setFeedback(''), 3000);
+                        } catch (err: any) {
+                          setErrorMsg(err.message || 'Error al promover.');
+                        }
+                      }}
+                      onRemove={async (playerId) => {
+                        try {
+                          await DbService.leaveWaitlist(selectedManageTour.id, playerId);
+                          await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+                          setFeedback('Jugador removido de la lista de espera.');
+                          setTimeout(() => setFeedback(''), 3000);
+                        } catch (err: any) {
+                          setErrorMsg(err.message || 'Error al remover.');
+                        }
+                      }}
+                    />
+                  )}
+
+                  {organizerTournamentsTab === 'matches' && (
+                    <MatchesTab
+                      tournament={selectedManageTour}
+                      activeBracket={activeBracket}
+                      bracketMatches={bracketMatches}
+                      isLoading={bracketLoading}
+                      onGenerateBracket={handleGenerateBracket}
+                      onRefresh={async () => {
+                        await refreshManageTournamentCompetitiveData(selectedManageTour.id);
+                      }}
+                      currentUser={currentUser}
+                    />
+                  )}
+
+                  {organizerTournamentsTab === 'mesas' && (
+                    <MesasTab
+                      tournament={selectedManageTour}
+                      bracketMatches={bracketMatches}
+                      judges={judges}
+                      currentUser={currentUser}
+                    />
+                  )}
+
+                  {organizerTournamentsTab === 'jueces' && (
+                    <JuecesTab
+                      tournament={selectedManageTour}
+                      judges={judges}
+                      currentUser={currentUser}
+                    />
+                  )}
+
+                  {organizerTournamentsTab === 'clasificaciones' && (
+                    <ClasificacionesTab
+                      tournament={selectedManageTour}
+                      onSaved={async () => {
+                        loadData();
+                        const updatedList = await DbService.getTournamentsList();
+                        const updated = updatedList.find(t => t.id === selectedManageTour.id);
+                        if (updated) setSelectedManageTour(updated);
+                        setFeedback('Clasificaciones actualizadas.');
+                        setTimeout(() => setFeedback(''), 3000);
+                      }}
+                    />
+                  )}
+
+                  {organizerTournamentsTab === 'comunicaciones' && (
+                    <ComunicacionesTab
+                      tournament={selectedManageTour}
+                      currentUser={currentUser}
+                    />
+                  )}
                 </div>
               ) : (
                 <div className="bg-beyblade-card border border-white/5 rounded-3xl p-12 text-center text-gray-500 text-xs italic">
@@ -4495,6 +4499,61 @@ export const AdminDashboard: React.FC = () => {
                         className="w-full bg-beyblade-darker border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
                       />
                     </div>
+                    <div className="border-t border-white/5 pt-3 mt-1 space-y-2 text-left">
+                      <label className="text-[9.5px] text-beyblade-electricCyan font-black uppercase tracking-wider font-esports block">Distribución de Puntos</label>
+                      <div className="grid grid-cols-5 gap-1.5 text-center">
+                        <div className="space-y-1">
+                          <label className="text-[8px] text-gray-500 font-bold block">1º</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={pointsFirst}
+                            onChange={(e) => setPointsFirst(Number(e.target.value))}
+                            className="w-full bg-beyblade-darker border border-white/10 rounded-lg py-1 text-center font-bold text-white text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[8px] text-gray-500 font-bold block">2º</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={pointsSecond}
+                            onChange={(e) => setPointsSecond(Number(e.target.value))}
+                            className="w-full bg-beyblade-darker border border-white/10 rounded-lg py-1 text-center font-bold text-white text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[8px] text-gray-500 font-bold block">3º</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={pointsThird}
+                            onChange={(e) => setPointsThird(Number(e.target.value))}
+                            className="w-full bg-beyblade-darker border border-white/10 rounded-lg py-1 text-center font-bold text-white text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[8px] text-gray-500 font-bold block">4º</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={pointsFourth}
+                            onChange={(e) => setPointsFourth(Number(e.target.value))}
+                            className="w-full bg-beyblade-darker border border-white/10 rounded-lg py-1 text-center font-bold text-white text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[8px] text-gray-500 font-bold block">Part.</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={pointsParticipation}
+                            onChange={(e) => setPointsParticipation(Number(e.target.value))}
+                            className="w-full bg-beyblade-darker border border-white/10 rounded-lg py-1 text-center font-bold text-white text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
                     <button
                       type="button"
                       onClick={async () => {
@@ -4509,13 +4568,23 @@ export const AdminDashboard: React.FC = () => {
                             start_date: newSeasonStartDate,
                             end_date: newSeasonEndDate || undefined,
                             description: newSeasonDesc,
-                            status: 'draft'
+                            status: 'draft',
+                            points_first: pointsFirst,
+                            points_second: pointsSecond,
+                            points_third: pointsThird,
+                            points_fourth: pointsFourth,
+                            points_participation: pointsParticipation
                           });
                           setFeedback('¡Temporada creada como Borrador con éxito!');
                           setNewSeasonName('');
                           setNewSeasonStartDate('');
                           setNewSeasonEndDate('');
                           setNewSeasonDesc('');
+                          setPointsFirst(5);
+                          setPointsSecond(4);
+                          setPointsThird(3);
+                          setPointsFourth(2);
+                          setPointsParticipation(1);
                           loadData();
                           setTimeout(() => setFeedback(''), 3000);
                         } catch (err: any) {
@@ -4746,6 +4815,13 @@ export const AdminDashboard: React.FC = () => {
             </div>
           )}
 
+          {organizerTab === 'stats' && (
+            <OrganizadorStatsTab currentUser={currentUser} />
+          )}
+
+          {organizerTab === 'hasbro' && (
+            <HasbroReadyDashboard currentUser={currentUser} />
+          )}
         </div>
       )}
 

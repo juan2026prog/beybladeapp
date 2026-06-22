@@ -16,7 +16,7 @@ export class NotificationService {
    */
   public static async notifyUser(
     userId: string,
-    type: 'new_tournament' | 'new_journey' | 'points_awarded' | 'waitlist_promoted' | 'attendance_required' | 'bye_assigned' | 'bracket_published',
+    type: 'new_tournament' | 'new_journey' | 'points_awarded' | 'waitlist_promoted' | 'attendance_required' | 'bye_assigned' | 'bracket_published' | 'mass_announcement',
     payload: NotificationPayload
   ): Promise<{ inApp: string; push: string; whatsapp: string }> {
     const deliveryReport = { inApp: 'skipped', push: 'skipped', whatsapp: 'skipped' };
@@ -46,6 +46,10 @@ export class NotificationService {
         inAppEnabled = prefs.points_awarded_in_app;
         pushEnabled = prefs.points_awarded_push;
         whatsappEnabled = prefs.points_awarded_whatsapp;
+      } else if (type === 'mass_announcement') {
+        inAppEnabled = true;
+        pushEnabled = prefs.push_enabled;
+        whatsappEnabled = prefs.whatsapp_opt_in;
       } else {
         // Critical transactional alerts (waitlist, attendance, brackets, bye)
         inAppEnabled = true;
